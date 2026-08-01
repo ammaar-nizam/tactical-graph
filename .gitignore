@@ -13,3 +13,6 @@ __pycache__/
 
 # Logs
 *.log
+
+# Cypher query scratchpad
+data-pipeline/cyphers.json
