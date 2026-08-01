@@ -7,7 +7,8 @@ using Pydantic BaseSettings for strict type validation and defaults management.
 
 from functools import lru_cache
 import logging
-from typing import Optional
+import os
+from typing import Any, Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -52,6 +53,10 @@ class Settings(BaseSettings):
     )
 
     # Kaggle Dataset Configuration
+    KAGGLE_API_TOKEN: Optional[str] = Field(
+        default=None,
+        description="Optional Kaggle API token for kagglehub authentication",
+    )
     KAGGLE_DATASET_HANDLE: str = Field(
         default="davidcariboo/player-scores",
         description="Kaggle dataset handle in format 'owner/dataset-name'",
@@ -77,6 +82,14 @@ class Settings(BaseSettings):
         extra="ignore",
         case_sensitive=True,
     )
+
+    def model_post_init(self, __context: Any) -> None:
+        """
+        Post-initialization hook to export KAGGLE_API_TOKEN to os.environ if provided.
+        """
+        if self.KAGGLE_API_TOKEN:
+            os.environ["KAGGLE_API_TOKEN"] = self.KAGGLE_API_TOKEN
+            logger.info("Exported KAGGLE_API_TOKEN to os.environ for kagglehub authentication.")
 
     @field_validator("NEO4J_URI", mode="after")
     @classmethod

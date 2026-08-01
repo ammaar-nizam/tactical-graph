@@ -8,7 +8,8 @@ Creates (:Country), (:Competition), and (:NationalTeam) nodes, as well as
 
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
 
@@ -144,7 +145,7 @@ class ReferenceLoader(BaseLoader):
             })
         return records
 
-    def load(self, data_dir: str, dev_mode: bool = False) -> None:
+    def load(self, data_dir: Union[str, Path], dev_mode: bool = False) -> None:
         """
         Load reference domain CSV files into Neo4j.
 

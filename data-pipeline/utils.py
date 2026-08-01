@@ -5,8 +5,8 @@ Provides dataset filtering and sub-graph extraction capabilities for development
 """
 
 import logging
-import os
-from typing import Any, Dict, Set
+from pathlib import Path
+from typing import Any, Dict, Set, Union
 
 import pandas as pd
 
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_dev_subgraph_ids(
-    data_dir: str, target_competition_id: str = "GB1"
+    data_dir: Union[str, Path], target_competition_id: str = "GB1"
 ) -> Dict[str, Set[Any]]:
     """
     Extract active competition, club, and player IDs for development mode (DEV_MODE).

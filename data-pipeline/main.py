@@ -8,12 +8,14 @@ matches → appearances → game events, with watermark-based incremental suppor
 
 import argparse
 import logging
+from pathlib import Path
 import sys
 import time
 from typing import Optional
 
 from config import get_settings
 from database import Neo4jDatabase
+from dataset import DatasetManager
 from schema import SchemaInstaller
 from watermark import WatermarkManager
 from loaders.reference_loader import ReferenceLoader
@@ -72,9 +74,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--data-dir",
-        default="./data",
+        default=None,
         metavar="PATH",
-        help="Path to directory containing the Kaggle CSV files (default: ./data).",
+        help="Optional custom path to directory containing raw CSV files (default: dynamically downloaded/cached via kagglehub).",
     )
     parser.add_argument(
         "--dev",
@@ -146,16 +148,23 @@ def main() -> None:
     dev_mode: bool = args.dev or (args.dev_comp != "GB1")
     dev_comp: str = args.dev_comp
     mode: str = args.mode
-    data_dir: str = args.data_dir
-
-    logger.info("=" * 60)
-    logger.info("  TacticalGraph Data Pipeline")
-    logger.info("  mode=%s | dev_mode=%s | dev_comp=%s | data_dir=%s",
-                mode, dev_mode, dev_comp, data_dir)
-    logger.info("=" * 60)
 
     pipeline_start = time.perf_counter()
     settings = get_settings()
+
+    # Step 0: Resolve dataset path (via DatasetManager or local CLI override)
+    if args.data_dir:
+        dataset_path = Path(args.data_dir)
+        logger.info("Using explicit local data directory: %s", dataset_path)
+    else:
+        dataset_manager = DatasetManager(settings=settings)
+        dataset_path = _timed_step("Acquire Kaggle Dataset", dataset_manager.get_dataset_path)
+
+    logger.info("=" * 60)
+    logger.info("  TacticalGraph Data Pipeline")
+    logger.info("  mode=%s | dev_mode=%s | dev_comp=%s | dataset_path=%s",
+                mode, dev_mode, dev_comp, dataset_path)
+    logger.info("=" * 60)
 
     # Shared database connection
     db = Neo4jDatabase(settings=settings)
@@ -189,7 +198,7 @@ def main() -> None:
         _timed_step(
             "Reference Loader (countries, competitions, national teams)",
             ReferenceLoader(db=db, settings=settings).load,
-            data_dir,
+            dataset_path,
             dev_mode,
         )
 
@@ -197,7 +206,7 @@ def main() -> None:
         _timed_step(
             "Entities Loader (clubs, players, valuations)",
             EntitiesLoader(db=db, settings=settings).load,
-            data_dir,
+            dataset_path,
             dev_mode,
         )
 
@@ -205,7 +214,7 @@ def main() -> None:
         _timed_step(
             "Transfers Loader",
             TransfersLoader(db=db, settings=settings).load,
-            data_dir,
+            dataset_path,
             dev_mode,
         )
 
@@ -213,7 +222,7 @@ def main() -> None:
         _timed_step(
             "Matches Loader (games, club_games)",
             MatchesLoader(db=db, settings=settings).load,
-            data_dir,
+            dataset_path,
             dev_mode,
             watermark_date,  # passes through for incremental date filter
         )
@@ -222,7 +231,7 @@ def main() -> None:
         _timed_step(
             "Appearances Loader (appearances + game_lineups)",
             AppearancesLoader(db=db, settings=settings).load,
-            data_dir,
+            dataset_path,
             dev_mode,
         )
 
@@ -230,16 +239,15 @@ def main() -> None:
         _timed_step(
             "Game Events Loader",
             GameEventsLoader(db=db, settings=settings).load,
-            data_dir,
+            dataset_path,
             dev_mode,
         )
 
         # Step 9: Update watermark
         import pandas as pd
-        import os
 
-        games_path = os.path.join(data_dir, "games.csv")
-        if os.path.exists(games_path):
+        games_path = dataset_path / "games.csv"
+        if games_path.exists():
             try:
                 games_df = pd.read_csv(games_path, usecols=["date"])
                 games_df["date"] = pd.to_datetime(games_df["date"], errors="coerce")

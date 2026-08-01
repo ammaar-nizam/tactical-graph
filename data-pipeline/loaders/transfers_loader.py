@@ -7,7 +7,8 @@ edges with full transfer metadata properties.
 
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
 
@@ -82,7 +83,7 @@ class TransfersLoader(BaseLoader):
             )
         return records
 
-    def load(self, data_dir: str, dev_mode: bool = False) -> None:
+    def load(self, data_dir: Union[str, Path], dev_mode: bool = False) -> None:
         """
         Load transfers.csv into Neo4j as TRANSFERRED_TO relationship edges.
 

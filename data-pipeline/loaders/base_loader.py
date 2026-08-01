@@ -9,7 +9,8 @@ and development mode filtering.
 from abc import ABC, abstractmethod
 import logging
 import os
-from typing import Any, Dict, List, Optional, Set
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Union
 
 import pandas as pd
 
@@ -40,7 +41,7 @@ class BaseLoader(ABC):
         self.settings = settings or get_settings()
         self.db = db or Neo4jDatabase(settings=self.settings)
 
-    def read_csv(self, file_path: str) -> pd.DataFrame:
+    def read_csv(self, file_path: Union[str, Path]) -> pd.DataFrame:
         """
         Read a CSV file into a pandas DataFrame with error handling.
 
@@ -54,18 +55,19 @@ class BaseLoader(ABC):
             FileNotFoundError: If the file does not exist.
             Exception: If reading the CSV fails.
         """
-        if not os.path.exists(file_path):
-            error_msg = f"CSV file not found at path: {file_path}"
+        path_obj = Path(file_path)
+        if not path_obj.exists():
+            error_msg = f"CSV file not found at path: {path_obj}"
             logger.error(error_msg)
             raise FileNotFoundError(error_msg)
 
         try:
-            logger.info("Loading CSV from %s", file_path)
-            df = pd.read_csv(file_path)
-            logger.info("Loaded %d rows from %s", len(df), file_path)
+            logger.info("Loading CSV from %s", path_obj)
+            df = pd.read_csv(path_obj)
+            logger.info("Loaded %d rows from %s", len(df), path_obj)
             return df
         except Exception as e:
-            logger.error("Failed to read CSV file %s: %s", file_path, e)
+            logger.error("Failed to read CSV file %s: %s", path_obj, e)
             raise
 
     def sanitize_dataframe(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
@@ -133,7 +135,7 @@ class BaseLoader(ABC):
 
         return processed
 
-    def get_dev_filter_ids(self, data_dir: str) -> Dict[str, Set[Any]]:
+    def get_dev_filter_ids(self, data_dir: Union[str, Path]) -> Dict[str, Set[Any]]:
         """
         Retrieve valid competition, club, and player ID sets for DEV_MODE filtering.
 
@@ -147,7 +149,7 @@ class BaseLoader(ABC):
         return get_dev_subgraph_ids(data_dir=data_dir)
 
     @abstractmethod
-    def load(self, data_dir: str, dev_mode: bool = False) -> None:
+    def load(self, data_dir: Union[str, Path], dev_mode: bool = False) -> None:
         """
         Abstract method to run data ingestion for concrete loaders.
 

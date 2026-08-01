@@ -8,7 +8,8 @@ relationship edges with full per-club match performance properties.
 
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
 
@@ -144,7 +145,7 @@ class MatchesLoader(BaseLoader):
 
     def load(
         self,
-        data_dir: str,
+        data_dir: Union[str, Path],
         dev_mode: bool = False,
         watermark_date: Optional[str] = None,
     ) -> None:

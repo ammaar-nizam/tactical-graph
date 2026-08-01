@@ -7,7 +7,8 @@ relationship edges that vary by event type (Goals, Substitutions, Cards).
 
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pandas as pd
 
@@ -230,7 +231,7 @@ class GameEventsLoader(BaseLoader):
                 records.append({"eventId": str(event_id), "playerId": str(player_id)})
         return records
 
-    def load(self, data_dir: str, dev_mode: bool = False) -> None:
+    def load(self, data_dir: Union[str, Path], dev_mode: bool = False) -> None:
         """
         Load game_events.csv into Neo4j as GameEvent nodes and semantic edges.
 

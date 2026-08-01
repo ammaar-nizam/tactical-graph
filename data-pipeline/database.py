@@ -166,7 +166,8 @@ class Neo4jDatabase(IDatabase):
             raise RuntimeError("Database driver is not initialized.")
 
         try:
-            self._driver.verify_connectivity()
+            target_db = self._settings.NEO4J_DATABASE or "neo4j"
+            self._driver.verify_connectivity(database=target_db)
             return True
         except Exception as e:
             logger.error("Neo4j connectivity check failed: %s", e)
@@ -179,14 +180,17 @@ class Neo4jDatabase(IDatabase):
         """
         Context manager for managing Neo4j session lifecycle safely.
 
+        Explicitly sets database (defaulting to "neo4j") to eliminate extra network
+        roundtrips when connecting to Neo4j Aura instances.
+
         Args:
-            db_name: Name of target Neo4j database. Defaults to configured database.
+            db_name: Name of target Neo4j database. Defaults to configured database ("neo4j").
             access_mode: "WRITE" or "READ".
 
         Yields:
             Session: Neo4j session instance.
         """
-        target_db = db_name or self._settings.NEO4J_DATABASE
+        target_db = db_name or self._settings.NEO4J_DATABASE or "neo4j"
         mode = (
             neo4j.WRITE_ACCESS
             if access_mode.upper() == "WRITE"
@@ -230,7 +234,7 @@ class Neo4jDatabase(IDatabase):
             List[Dict[str, Any]]: Query result records formatted as dictionaries.
         """
         params = parameters or {}
-        target_db = db_name or self._settings.NEO4J_DATABASE
+        target_db = db_name or self._settings.NEO4J_DATABASE or "neo4j"
 
         def _raw_execution() -> List[Dict[str, Any]]:
             start_time = time.perf_counter()
