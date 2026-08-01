@@ -116,16 +116,16 @@ def _timed_step(label: str, fn, *args, **kwargs):
     Returns:
         The return value of fn, or re-raises on exception.
     """
-    logger.info("━━━ STEP START: %s ━━━", label)
+    logger.info("=== STEP START: %s ===", label)
     t0 = time.perf_counter()
     try:
         result = fn(*args, **kwargs)
         elapsed = time.perf_counter() - t0
-        logger.info("━━━ STEP DONE:  %s  (%.2fs) ━━━", label, elapsed)
+        logger.info("=== STEP DONE:  %s  (%.2fs) ===", label, elapsed)
         return result
     except Exception as e:
         elapsed = time.perf_counter() - t0
-        logger.error("━━━ STEP FAILED: %s  (%.2fs) — %s ━━━", label, elapsed, e)
+        logger.error("=== STEP FAILED: %s  (%.2fs) - %s ===", label, elapsed, e)
         raise
 # endregion
 
@@ -255,7 +255,7 @@ def main() -> None:
                 if pd.notna(latest_date):
                     latest_date_str = latest_date.strftime("%Y-%m-%d")
                     _timed_step(
-                        f"Update Watermark → {latest_date_str}",
+                        f"Update Watermark -> {latest_date_str}",
                         watermark_manager.update_last_processed_date,
                         latest_date_str,
                     )

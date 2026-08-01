@@ -8,12 +8,49 @@ using Pydantic BaseSettings for strict type validation and defaults management.
 from functools import lru_cache
 import logging
 import os
+from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
+
+# Compute project root directory to ensure .env is loaded regardless of working directory
+_BASE_DIR = Path(__file__).resolve().parent.parent
+_ENV_FILE_PATH = _BASE_DIR / ".env"
+
+
+def mask_neo4j_uri(uri: str) -> str:
+    """
+    Mask sensitive host/id parts of Neo4j connection URI for safe startup logging.
+
+    Example:
+        'neo4j+s://4446f270.databases.neo4j.io' -> 'neo4j+s://4446****.databases.neo4j.io'
+        'bolt://localhost:7687'                -> 'bolt://localhost:7687'
+    """
+    if not uri:
+        return "<empty>"
+    try:
+        parsed = urlparse(uri)
+        scheme = parsed.scheme or "bolt"
+        hostname = parsed.hostname or "localhost"
+        port = f":{parsed.port}" if parsed.port else ""
+
+        if hostname in ("localhost", "127.0.0.1"):
+            masked_host = hostname
+        elif "." in hostname:
+            parts = hostname.split(".", 1)
+            prefix = parts[0]
+            masked_prefix = prefix[:4] + "****" if len(prefix) > 4 else "****"
+            masked_host = f"{masked_prefix}.{parts[1]}"
+        else:
+            masked_host = hostname[:4] + "****" if len(hostname) > 4 else "****"
+
+        return f"{scheme}://{masked_host}{port}"
+    except Exception:
+        return "neo4j+s://****"
 
 
 class Settings(BaseSettings):
@@ -77,7 +114,7 @@ class Settings(BaseSettings):
     )
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(_ENV_FILE_PATH, ".env", "../.env"),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=True,
@@ -85,11 +122,15 @@ class Settings(BaseSettings):
 
     def model_post_init(self, __context: Any) -> None:
         """
-        Post-initialization hook to export KAGGLE_API_TOKEN to os.environ if provided.
+        Post-initialization hook to export KAGGLE_API_TOKEN to os.environ if provided
+        and log masked active NEO4J_URI endpoint.
         """
         if self.KAGGLE_API_TOKEN:
             os.environ["KAGGLE_API_TOKEN"] = self.KAGGLE_API_TOKEN
             logger.info("Exported KAGGLE_API_TOKEN to os.environ for kagglehub authentication.")
+
+        masked_endpoint = mask_neo4j_uri(self.NEO4J_URI)
+        logger.info("Loaded configuration. Active NEO4J_URI: %s (database: '%s')", masked_endpoint, self.NEO4J_DATABASE)
 
     @field_validator("NEO4J_URI", mode="after")
     @classmethod

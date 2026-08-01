@@ -11,6 +11,7 @@ tactical-graph/
 ├── data-pipeline/               # Ingestion pipeline & Neo4j ETL loaders
 │   ├── config.py                # Pydantic BaseSettings (.env loading & validation)
 │   ├── database.py              # Neo4j driver pool, session execution & retries
+│   ├── dataset.py               # DatasetManager (Kaggle dataset download, caching & retries via kagglehub)
 │   ├── schema.py                # SchemaInstaller (uniqueness constraints & indexes)
 │   ├── watermark.py             # WatermarkManager for delta incremental updates
 │   ├── utils.py                 # Subgraph extraction & DEV_MODE filtering helpers
@@ -34,17 +35,22 @@ tactical-graph/
 ## Setup & Environment Configuration
 
 ### 1. Environment File setup
-Copy `.env.example` to `.env` and fill in your Neo4j database credentials:
+Copy `.env.example` to `.env` and fill in your Neo4j database credentials and optional Kaggle API token:
 ```bash
 cp .env.example .env
 ```
 
-Default credentials in `.env`:
+Configuration parameters in `.env`:
 ```env
+# Neo4j Database Credentials & Connection Endpoint
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=password
 NEO4J_DATABASE=neo4j
+
+# Kaggle Dataset Configuration (Optional Kaggle API token for authentication)
+KAGGLE_API_TOKEN=your_kaggle_api_token_here
+KAGGLE_DATASET_HANDLE=davidcariboo/player-scores
 ```
 
 ### 2. Python Virtual Environment
@@ -62,14 +68,19 @@ pip install -r data-pipeline/requirements.txt
 
 ## Running the Data Pipeline
 
-The pipeline is orchestrated via `data-pipeline/main.py`:
+The pipeline is orchestrated via `data-pipeline/main.py`. By default, `DatasetManager` dynamically fetches and caches the latest Transfermarkt dataset from Kaggle via `kagglehub` (with tenacity exponential backoff retries for rate limits and automatic local caching to bypass redundant downloads).
 
 ```bash
 cd data-pipeline
 ```
 
 ### Full Ingestion Mode
-Loads all raw CSV data into Neo4j:
+Loads all raw CSV data into Neo4j (automatically downloads/retrieves cached dataset via `kagglehub`):
+```bash
+python main.py --mode full
+```
+
+*Note: You can optionally pass `--data-dir PATH` to override dynamic kagglehub retrieval and use a custom local CSV directory:*
 ```bash
 python main.py --mode full --data-dir ./data
 ```
@@ -77,17 +88,17 @@ python main.py --mode full --data-dir ./data
 ### Incremental Ingestion Mode
 Filters game datasets to process records with `game_date > last_watermark_date`:
 ```bash
-python main.py --mode incremental --data-dir ./data
+python main.py --mode incremental
 ```
 
 ### Development Mode (`DEV_MODE`)
 Sub-filters the dataset to a single target competition (default: Premier League `'GB1'`) to allow rapid testing while maintaining complete referential integrity:
 ```bash
 # Filter Premier League (GB1) subgraph
-python main.py --dev --data-dir ./data
+python main.py --dev
 
 # Filter target competition (e.g. La Liga 'ES1')
-python main.py --dev-comp ES1 --data-dir ./data
+python main.py --dev-comp ES1
 ```
 
 ---

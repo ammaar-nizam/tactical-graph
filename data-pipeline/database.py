@@ -28,7 +28,7 @@ from tenacity import (
     wait_exponential,
 )
 
-from config import Settings, get_settings
+from config import Settings, get_settings, mask_neo4j_uri
 
 logger = logging.getLogger(__name__)
 
@@ -111,15 +111,14 @@ class Neo4jDatabase(IDatabase):
 
     def connect(self) -> None:
         """
-        Initialize Neo4j driver with connection pooling.
+        Initialize Neo4j driver with connection pooling and SSL fallback resilience for Neo4j Aura.
         """
         if self._driver is not None:
             logger.debug("Neo4j driver is already initialized.")
             return
 
-        logger.info(
-            "Initializing Neo4j connection pool to URI: %s", self._settings.NEO4J_URI
-        )
+        masked_endpoint = mask_neo4j_uri(self._settings.NEO4J_URI)
+        logger.info("Initializing Neo4j connection pool to URI: %s", masked_endpoint)
         try:
             self._driver = GraphDatabase.driver(
                 self._settings.NEO4J_URI,
@@ -127,12 +126,36 @@ class Neo4jDatabase(IDatabase):
                 max_connection_pool_size=self._settings.NEO4J_MAX_CONNECTION_POOL_SIZE,
                 connection_timeout=self._settings.NEO4J_CONNECTION_TIMEOUT,
             )
-            self.verify_connectivity()
+            try:
+                self.verify_connectivity()
+            except Exception as conn_err:
+                err_str = str(conn_err)
+                if "neo4j+s://" in self._settings.NEO4J_URI and (
+                    "SSLCertVerificationError" in err_str
+                    or "SecurityError" in err_str
+                    or "routing" in err_str
+                ):
+                    fallback_uri = self._settings.NEO4J_URI.replace("neo4j+s://", "neo4j+ssc://")
+                    logger.warning(
+                        "SSL CA verification failed for %s. Attempting fallback to self-signed certificate protocol (neo4j+ssc://)...",
+                        masked_endpoint,
+                    )
+                    self.close()
+                    self._driver = GraphDatabase.driver(
+                        fallback_uri,
+                        auth=(self._settings.NEO4J_USER, self._settings.NEO4J_PASSWORD),
+                        max_connection_pool_size=self._settings.NEO4J_MAX_CONNECTION_POOL_SIZE,
+                        connection_timeout=self._settings.NEO4J_CONNECTION_TIMEOUT,
+                    )
+                    self.verify_connectivity()
+                else:
+                    raise conn_err
+
             logger.info("Successfully connected to Neo4j database.")
         except Exception as e:
             logger.error(
                 "Failed to connect to Neo4j database at %s: %s",
-                self._settings.NEO4J_URI,
+                masked_endpoint,
                 e,
             )
             self.close()
@@ -153,7 +176,7 @@ class Neo4jDatabase(IDatabase):
 
     def verify_connectivity(self) -> bool:
         """
-        Verify database connection health.
+        Verify database connection health without keyword arguments to prevent PreviewWarnings.
 
         Returns:
             bool: True if connection is healthy.
@@ -166,8 +189,7 @@ class Neo4jDatabase(IDatabase):
             raise RuntimeError("Database driver is not initialized.")
 
         try:
-            target_db = self._settings.NEO4J_DATABASE or "neo4j"
-            self._driver.verify_connectivity(database=target_db)
+            self._driver.verify_connectivity()
             return True
         except Exception as e:
             logger.error("Neo4j connectivity check failed: %s", e)
