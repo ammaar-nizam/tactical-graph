@@ -2,6 +2,8 @@
 
 TacticalGraph is a high-performance Knowledge Graph (Neo4j) data ingestion engine and GraphRAG platform designed for football/soccer analytics using Kaggle Transfermarkt data.
 
+> Developed with **Antigravity CLI**.
+
 ---
 
 ## Repository Structure
@@ -106,3 +108,9 @@ python main.py --dev-comp ES1
 ## Graph Data Model & Documentation
 
 For details on node labels, relationship types, property schemas, constraints, and performance indexes, refer to [schema.md](file:///C:/Projects/tactical-graph/data-pipeline/schema.md).
+
+---
+
+## Acknowledgments
+
+Developed with **Antigravity CLI**.

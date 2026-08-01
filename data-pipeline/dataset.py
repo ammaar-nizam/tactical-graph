@@ -32,6 +32,8 @@ REQUIRED_CSV_FILES: List[str] = [
     "game_events.csv",
     "player_valuations.csv",
     "game_lineups.csv",
+    "countries.csv",
+    "national_teams.csv",
 ]
 
 
