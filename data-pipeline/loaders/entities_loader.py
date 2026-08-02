@@ -84,8 +84,9 @@ class EntitiesLoader(BaseLoader):
 
     CYPHER_MERGE_VALUATIONS = """
     UNWIND $batch AS row
-    MERGE (pv:PlayerValuation {date: row.date})
-    SET pv.marketValueInEur = toFloat(row.marketValueInEur)
+    MERGE (pv:PlayerValuation {id: row.id})
+    SET pv.date             = row.date,
+        pv.marketValueInEur = toFloat(row.marketValueInEur)
     WITH pv, row
     WHERE row.playerId IS NOT NULL
     MERGE (p:Player {id: row.playerId})
@@ -164,12 +165,15 @@ class EntitiesLoader(BaseLoader):
             val_date = row.get("date") or row.get("valuation_date")
             if pid is None or pd.isna(pid) or val_date is None or pd.isna(val_date):
                 continue
+            val_id = f"{str(pid).strip()}_{str(val_date).strip()}"
             records.append({
+                "id": val_id,
                 "playerId": str(pid),
                 "date": str(val_date),
                 "marketValueInEur": row.get("market_value_in_eur") or row.get("market_value") or row.get("marketValueInEur"),
             })
         return records
+
 
     def load(self, data_dir: Union[str, Path], dev_mode: bool = False) -> None:
         """

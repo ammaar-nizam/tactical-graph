@@ -24,7 +24,7 @@ class SchemaInstaller:
         "CREATE CONSTRAINT national_team_id_unique IF NOT EXISTS FOR (n:NationalTeam) REQUIRE n.id IS UNIQUE",
         "CREATE CONSTRAINT club_id_unique IF NOT EXISTS FOR (c:Club) REQUIRE c.id IS UNIQUE",
         "CREATE CONSTRAINT player_id_unique IF NOT EXISTS FOR (p:Player) REQUIRE p.id IS UNIQUE",
-        "CREATE CONSTRAINT player_valuation_date_unique IF NOT EXISTS FOR (pv:PlayerValuation) REQUIRE pv.date IS UNIQUE",
+        "CREATE CONSTRAINT player_valuation_id_unique IF NOT EXISTS FOR (pv:PlayerValuation) REQUIRE pv.id IS UNIQUE",
         "CREATE CONSTRAINT game_id_unique IF NOT EXISTS FOR (g:Game) REQUIRE g.id IS UNIQUE",
         "CREATE CONSTRAINT game_event_id_unique IF NOT EXISTS FOR (ge:GameEvent) REQUIRE ge.id IS UNIQUE",
     ]

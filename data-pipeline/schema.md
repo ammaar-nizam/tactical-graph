@@ -13,7 +13,7 @@ This document details the node labels, relationships, properties, uniqueness con
 | `:NationalTeam` | `id` | `id`, `name`, `teamCode`, `confederation`, `teamImageUrl`, `squadSize`, `averageAge`, `foreignersNumber`, `foreignersPercentage`, `totalMarketValue`, `coachName`, `fifaRanking`, `lastSeason`, `url` |
 | `:Club` | `id` | `id`, `code`, `name`, `totalMarketValue`, `squadSize`, `averageAge`, `foreignersNumber`, `foreignersPercentage`, `nationalTeamPlayers`, `stadiumName`, `stadiumSeats`, `netTransferRecord`, `coachName`, `lastSeason`, `fileName`, `url` |
 | `:Player` | `id` | `id`, `firstName`, `lastName`, `name`, `lastSeason`, `code`, `countryOfBirth`, `cityOfBirth`, `countryOfCitizenship`, `dateOfBirth`, `subPosition`, `position`, `foot`, `heightInCm`, `contractExpirationDate`, `agentName`, `imageUrl`, `internationalCaps`, `internationalGoals`, `url` |
-| `:PlayerValuation` | `date` | `date`, `marketValueInEur` |
+| `:PlayerValuation` | `id` | `id`, `date`, `marketValueInEur` |
 | `:Game` | `id` | `id`, `season`, `round`, `date`, `homeClubGoals`, `awayClubGoals`, `homeClubPosition`, `awayClubPosition`, `homeClubManagerName`, `awayClubManagerName`, `stadium`, `attendance`, `referee`, `url`, `homeClubFormation`, `awayClubFormation`, `aggregate` |
 | `:GameEvent` | `id` | `id`, `date`, `minute`, `type`, `description` |
 | `:Watermark` | `id` (`'global'`) | `id`, `last_processed_date`, `updated_at` |
@@ -62,7 +62,7 @@ CREATE CONSTRAINT competition_id_unique IF NOT EXISTS FOR (c:Competition) REQUIR
 CREATE CONSTRAINT national_team_id_unique IF NOT EXISTS FOR (n:NationalTeam) REQUIRE n.id IS UNIQUE;
 CREATE CONSTRAINT club_id_unique IF NOT EXISTS FOR (c:Club) REQUIRE c.id IS UNIQUE;
 CREATE CONSTRAINT player_id_unique IF NOT EXISTS FOR (p:Player) REQUIRE p.id IS UNIQUE;
-CREATE CONSTRAINT player_valuation_date_unique IF NOT EXISTS FOR (pv:PlayerValuation) REQUIRE pv.date IS UNIQUE;
+CREATE CONSTRAINT player_valuation_id_unique IF NOT EXISTS FOR (pv:PlayerValuation) REQUIRE pv.id IS UNIQUE;
 CREATE CONSTRAINT game_id_unique IF NOT EXISTS FOR (g:Game) REQUIRE g.id IS UNIQUE;
 CREATE CONSTRAINT game_event_id_unique IF NOT EXISTS FOR (ge:GameEvent) REQUIRE ge.id IS UNIQUE;
 ```
