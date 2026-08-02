@@ -96,7 +96,11 @@ class Settings(BaseSettings):
     )
     KAGGLE_DATASET_HANDLE: str = Field(
         default="davidcariboo/player-scores",
-        description="Kaggle dataset handle in format 'owner/dataset-name'",
+        description="Primary Kaggle dataset handle in format 'owner/dataset-name'",
+    )
+    TRANSFER_DATASET_HANDLE: str = Field(
+        default="mexwell/football-player-transfers",
+        description="Supplementary transfer dataset handle in format 'owner/dataset-name'",
     )
 
     # Resilience & Retry Backoff Configuration

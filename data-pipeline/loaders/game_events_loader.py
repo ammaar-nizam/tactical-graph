@@ -33,9 +33,7 @@ class GameEventsLoader(BaseLoader):
     - All events:       (GameEvent)-[:OCCURRED_IN]->(Game)
     - All events:       (Club)-[:INVOLVED_IN]->(GameEvent)
     - Goals:            (Player)-[:SCORED]->(GameEvent)
-    - Goals w/ assist:  (Player)-[:ASSISTED]->(GameEvent)
     - Substitutions:    (Player)-[:SUBBED_OUT]->(GameEvent) via player_id
-    - Substitutions:    (Player)-[:SUBBED_IN]->(GameEvent)  via player_in_id
     - Cards:            (Player)-[:RECEIVED_CARD]->(GameEvent)
     """
 
@@ -64,28 +62,12 @@ class GameEventsLoader(BaseLoader):
     MERGE (p)-[:SCORED]->(ge)
     """
 
-    # ── Goals: assister ──────────────────────────────────────────────────────
-    CYPHER_MERGE_ASSISTED = """
-    UNWIND $batch AS row
-    MATCH (ge:GameEvent {id: row.eventId})
-    MERGE (p:Player {id: row.assistPlayerId})
-    MERGE (p)-[:ASSISTED]->(ge)
-    """
-
     # ── Substitutions: player coming off ────────────────────────────────────
     CYPHER_MERGE_SUBBED_OUT = """
     UNWIND $batch AS row
     MATCH (ge:GameEvent {id: row.eventId})
     MERGE (p:Player {id: row.playerId})
     MERGE (p)-[:SUBBED_OUT]->(ge)
-    """
-
-    # ── Substitutions: player coming on ──────────────────────────────────────
-    CYPHER_MERGE_SUBBED_IN = """
-    UNWIND $batch AS row
-    MATCH (ge:GameEvent {id: row.eventId})
-    MERGE (p:Player {id: row.playerInId})
-    MERGE (p)-[:SUBBED_IN]->(ge)
     """
 
     # ── Cards: recipient ──────────────────────────────────────────────────────
@@ -170,25 +152,6 @@ class GameEventsLoader(BaseLoader):
                 records.append({"eventId": str(event_id), "playerId": str(player_id)})
         return records
 
-    def _prepare_assisted(self, goals_df: pd.DataFrame) -> List[Dict[str, Any]]:
-        """Build ASSISTED relationship parameter dicts from goal events with an assist player."""
-        records: List[Dict[str, Any]] = []
-        event_id_col = "game_event_id" if "game_event_id" in goals_df.columns else "id"
-        assist_col = "player_assist_id" if "player_assist_id" in goals_df.columns else None
-        if not assist_col:
-            return records
-        for row in goals_df.to_dict(orient="records"):
-            event_id = row.get(event_id_col)
-            assist_player_id = row.get(assist_col)
-            if (
-                event_id and not pd.isna(event_id)
-                and assist_player_id and not pd.isna(assist_player_id)
-            ):
-                records.append(
-                    {"eventId": str(event_id), "assistPlayerId": str(assist_player_id)}
-                )
-        return records
-
     def _prepare_subbed_out(self, subs_df: pd.DataFrame) -> List[Dict[str, Any]]:
         """Build SUBBED_OUT parameter dicts (player leaving the pitch)."""
         records: List[Dict[str, Any]] = []
@@ -201,20 +164,6 @@ class GameEventsLoader(BaseLoader):
             player_id = row.get(player_col)
             if event_id and not pd.isna(event_id) and player_id and not pd.isna(player_id):
                 records.append({"eventId": str(event_id), "playerId": str(player_id)})
-        return records
-
-    def _prepare_subbed_in(self, subs_df: pd.DataFrame) -> List[Dict[str, Any]]:
-        """Build SUBBED_IN parameter dicts (player entering the pitch)."""
-        records: List[Dict[str, Any]] = []
-        event_id_col = "game_event_id" if "game_event_id" in subs_df.columns else "id"
-        player_in_col = "player_in_id" if "player_in_id" in subs_df.columns else None
-        if not player_in_col:
-            return records
-        for row in subs_df.to_dict(orient="records"):
-            event_id = row.get(event_id_col)
-            player_in_id = row.get(player_in_col)
-            if event_id and not pd.isna(event_id) and player_in_id and not pd.isna(player_in_id):
-                records.append({"eventId": str(event_id), "playerInId": str(player_in_id)})
         return records
 
     def _prepare_received_card(self, cards_df: pd.DataFrame) -> List[Dict[str, Any]]:
@@ -238,10 +187,8 @@ class GameEventsLoader(BaseLoader):
         Processing order (dependency-safe):
         1. Merge all GameEvent nodes + OCCURRED_IN + INVOLVED_IN.
         2. SCORED edges (Goals).
-        3. ASSISTED edges (Goals with assist).
-        4. SUBBED_OUT edges (Substitutions – player leaving).
-        5. SUBBED_IN edges  (Substitutions – player entering).
-        6. RECEIVED_CARD edges (Cards).
+        3. SUBBED_OUT edges (Substitutions – player leaving).
+        4. RECEIVED_CARD edges (Cards).
 
         Args:
             data_dir: Directory path containing raw CSV files.
@@ -275,24 +222,16 @@ class GameEventsLoader(BaseLoader):
         total_nodes = self.execute_batch(self.CYPHER_MERGE_GAME_EVENT_NODE, event_node_records)
         logger.info("Merged %d GameEvent nodes with OCCURRED_IN / INVOLVED_IN edges.", total_nodes)
 
-        # ── Steps 2–6: semantic type-specific edges ──────────────────────────
+        # ── Steps 2–4: semantic type-specific edges ──────────────────────────
         goals_df, subs_df, cards_df = self._split_by_type(events_df)
 
         scored_records = self._prepare_scored(goals_df)
         self.execute_batch(self.CYPHER_MERGE_SCORED, scored_records)
         logger.info("Merged %d SCORED edges.", len(scored_records))
 
-        assisted_records = self._prepare_assisted(goals_df)
-        self.execute_batch(self.CYPHER_MERGE_ASSISTED, assisted_records)
-        logger.info("Merged %d ASSISTED edges.", len(assisted_records))
-
         subbed_out_records = self._prepare_subbed_out(subs_df)
         self.execute_batch(self.CYPHER_MERGE_SUBBED_OUT, subbed_out_records)
         logger.info("Merged %d SUBBED_OUT edges.", len(subbed_out_records))
-
-        subbed_in_records = self._prepare_subbed_in(subs_df)
-        self.execute_batch(self.CYPHER_MERGE_SUBBED_IN, subbed_in_records)
-        logger.info("Merged %d SUBBED_IN edges.", len(subbed_in_records))
 
         received_card_records = self._prepare_received_card(cards_df)
         self.execute_batch(self.CYPHER_MERGE_RECEIVED_CARD, received_card_records)

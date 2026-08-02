@@ -160,6 +160,17 @@ def main() -> None:
         dataset_manager = DatasetManager(settings=settings)
         dataset_path = _timed_step("Acquire Kaggle Dataset", dataset_manager.get_dataset_path)
 
+    # Step 0b: Resolve supplementary transfer dataset path
+    if not args.data_dir:
+        transfer_dataset_path = _timed_step(
+            "Acquire Supplementary Transfer Dataset",
+            dataset_manager.get_dataset_path,
+            handle=settings.TRANSFER_DATASET_HANDLE,
+            required_files=["premier-league.csv"],
+        )
+    else:
+        transfer_dataset_path = None
+
     logger.info("=" * 60)
     logger.info("  TacticalGraph Data Pipeline")
     logger.info("  mode=%s | dev_mode=%s | dev_comp=%s | dataset_path=%s",
@@ -217,6 +228,16 @@ def main() -> None:
             dataset_path,
             dev_mode,
         )
+
+        # Step 5b: Supplementary Transfer data (mexwell dataset, name-based matching)
+        if transfer_dataset_path:
+            _timed_step(
+                "Supplementary Transfers Loader (name-matching)",
+                TransfersLoader(db=db, settings=settings).load_supplementary_transfers,
+                transfer_dataset_path,
+                dataset_path,
+                dev_mode,
+            )
 
         # Step 6: Match data
         _timed_step(

@@ -41,6 +41,15 @@ class TransfersLoader(BaseLoader):
         t.fromClubName           = row.fromClubName
     """
 
+    CYPHER_MERGE_TRANSFERS_BY_NAME = """
+    UNWIND $batch AS row
+    MATCH (p:Player) WHERE toLower(p.name) = toLower(row.playerName)
+    MATCH (toClub:Club) WHERE toLower(toClub.name) = toLower(row.toClubName)
+    MERGE (p)-[t:TRANSFERRED_TO {transferSeason: row.transferSeason, fromClubName: row.fromClubName}]->(toClub)
+    SET t.transferFee = CASE WHEN row.transferFee IS NOT NULL THEN toFloat(row.transferFee) ELSE t.transferFee END,
+        t.transferPeriod = row.transferPeriod
+    """
+
     def _prepare_transfers(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
         """
         Map transfers DataFrame columns to camelCase Cypher parameter dicts.
@@ -83,6 +92,41 @@ class TransfersLoader(BaseLoader):
             )
         return records
 
+    def _prepare_supplementary_transfers(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
+        records: List[Dict[str, Any]] = []
+        for row in df.to_dict(orient="records"):
+            player_name = row.get("player_name")
+            if pd.isna(player_name):
+                continue
+            player_name = str(player_name).strip()
+            
+            to_club_name = row.get("club_name")
+            if pd.isna(to_club_name):
+                continue
+            to_club_name = str(to_club_name).strip()
+
+            from_club_name = row.get("club_involved_name")
+            from_club_name = str(from_club_name).strip() if not pd.isna(from_club_name) else None
+            
+            fee_cleaned = row.get("fee_cleaned")
+            transfer_fee = float(fee_cleaned) * 1_000_000 if not pd.isna(fee_cleaned) else None
+            
+            season = row.get("season")
+            transfer_season = str(season) if not pd.isna(season) else None
+            
+            transfer_period = row.get("transfer_period")
+            transfer_period = str(transfer_period) if not pd.isna(transfer_period) else None
+
+            records.append({
+                "playerName": player_name,
+                "toClubName": to_club_name,
+                "fromClubName": from_club_name,
+                "transferFee": transfer_fee,
+                "transferSeason": transfer_season,
+                "transferPeriod": transfer_period
+            })
+        return records
+
     def load(self, data_dir: Union[str, Path], dev_mode: bool = False) -> None:
         """
         Load transfers.csv into Neo4j as TRANSFERRED_TO relationship edges.
@@ -116,3 +160,64 @@ class TransfersLoader(BaseLoader):
         transfer_records = self._prepare_transfers(transfers_df)
         total = self.execute_batch(self.CYPHER_MERGE_TRANSFERS, transfer_records)
         logger.info("Completed Transfers Data Ingestion. Processed %d transfer records.", total)
+
+    def load_supplementary_transfers(self, transfer_data_dir: Union[str, Path], primary_data_dir: Union[str, Path], dev_mode: bool = False) -> None:
+        logger.info("Starting Supplementary Transfers Ingestion (dev_mode=%s)", dev_mode)
+        
+        transfer_dir = Path(transfer_data_dir)
+        if not transfer_dir.exists() or not transfer_dir.is_dir():
+            logger.warning("Supplementary transfers directory not found at %s. Skipping.", transfer_dir)
+            return
+            
+        csv_files = list(transfer_dir.glob("*.csv"))
+        if not csv_files:
+            logger.warning("No CSV files found in %s.", transfer_dir)
+            return
+            
+        dfs = []
+        for csv_file in csv_files:
+            try:
+                dfs.append(self.read_csv(csv_file))
+            except Exception as e:
+                logger.error("Failed to read %s: %s", csv_file, e)
+                
+        if not dfs:
+            logger.warning("No valid CSV files could be read in %s.", transfer_dir)
+            return
+            
+        combined_df = pd.concat(dfs, ignore_index=True)
+        total_rows = len(combined_df)
+        
+        if 'transfer_movement' in combined_df.columns:
+            combined_df = combined_df[combined_df['transfer_movement'] == 'in']
+        in_rows = len(combined_df)
+        
+        if dev_mode:
+            dev_filters = self.get_dev_filter_ids(primary_data_dir)
+            if dev_filters and "player_ids" in dev_filters:
+                valid_player_ids = {str(pid).strip() for pid in dev_filters["player_ids"]}
+                players_path = os.path.join(primary_data_dir, "players.csv")
+                if os.path.exists(players_path):
+                    try:
+                        players_df = self.read_csv(players_path)
+                        player_col = "player_id" if "player_id" in players_df.columns else "id"
+                        players_df = players_df[players_df[player_col].astype(str).str.strip().isin(valid_player_ids)]
+                        
+                        if 'name' in players_df.columns:
+                            valid_names = set(players_df['name'].str.lower().dropna())
+                            if 'player_name' in combined_df.columns:
+                                combined_df = combined_df[combined_df['player_name'].str.lower().isin(valid_names)]
+                    except Exception as e:
+                        logger.error("Failed to apply dev_mode filter for supplementary transfers: %s", e)
+                        
+        filtered_rows = len(combined_df)
+        
+        transfer_records = self._prepare_supplementary_transfers(combined_df)
+        prepared_count = len(transfer_records)
+        
+        total_merged = self.execute_batch(self.CYPHER_MERGE_TRANSFERS_BY_NAME, transfer_records)
+        
+        logger.info(
+            "Supplementary Transfers Summary: %d read, %d 'in', %d after dev_mode, %d prepared, %d merged.", 
+            total_rows, in_rows, filtered_rows, prepared_count, total_merged
+        )

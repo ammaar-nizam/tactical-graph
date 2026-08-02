@@ -50,9 +50,10 @@ NEO4J_USER=neo4j
 NEO4J_PASSWORD=password
 NEO4J_DATABASE=neo4j
 
-# Kaggle Dataset Configuration (Optional Kaggle API token for authentication)
+# Kaggle Dataset Handles (Optional Kaggle API token for authentication)
 KAGGLE_API_TOKEN=your_kaggle_api_token_here
 KAGGLE_DATASET_HANDLE=davidcariboo/player-scores
+TRANSFER_DATASET_HANDLE=mexwell/football-player-transfers
 ```
 
 ### 2. Python Virtual Environment
@@ -70,14 +71,14 @@ pip install -r data-pipeline/requirements.txt
 
 ## Running the Data Pipeline
 
-The pipeline is orchestrated via `data-pipeline/main.py`. By default, `DatasetManager` dynamically fetches and caches the latest Transfermarkt dataset from Kaggle via `kagglehub` (with tenacity exponential backoff retries for rate limits and automatic local caching to bypass redundant downloads).
+The pipeline is orchestrated via `data-pipeline/main.py`. By default, `DatasetManager` dynamically fetches and caches the primary dataset (`davidcariboo/player-scores`) and supplementary transfer dataset (`mexwell/football-player-transfers`) from Kaggle via `kagglehub` (with tenacity exponential backoff retries for rate limits and automatic local caching to bypass redundant downloads).
 
 ```bash
 cd data-pipeline
 ```
 
 ### Full Ingestion Mode
-Loads all raw CSV data into Neo4j (automatically downloads/retrieves cached dataset via `kagglehub`):
+Loads all raw CSV data into Neo4j (automatically downloads/retrieves cached datasets via `kagglehub`):
 ```bash
 python main.py --mode full
 ```

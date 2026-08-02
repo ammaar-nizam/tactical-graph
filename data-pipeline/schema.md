@@ -31,8 +31,9 @@ This document details the node labels, relationships, properties, uniqueness con
 - `(Player)-[:PLAYS_FOR]->(Club)` *(Represents active current club)*
 - `(Player)-[:REPRESENTS]->(NationalTeam)`
 - `(Player)-[:HAS_VALUATION]->(PlayerValuation)`
-- `(Player)-[:TRANSFERRED_TO {transferDate, transferSeason, transferFee, marketValueAtTransfer, fromClubId, fromClubName}]->(Club)`
+- `(Player)-[:TRANSFERRED_TO {transferDate, transferSeason, transferFee, transferPeriod, marketValueAtTransfer, fromClubId, fromClubName}]->(Club)`
   - *Note: Points directly to destination club. `fromClubId` is stored as a property for high-performance filtering without multi-hop temporal traversals.*
+  - *Data sources: `davidcariboo/player-scores` (ID-based), supplemented by `mexwell/football-player-transfers` (name-based matching).*
 
 ### 2.3 Match Containers & Team Performance
 - `(Game)-[:PART_OF_COMPETITION]->(Competition)`
@@ -47,9 +48,7 @@ This document details the node labels, relationships, properties, uniqueness con
 - `(GameEvent)-[:OCCURRED_IN]->(Game)`
 - `(Club)-[:INVOLVED_IN]->(GameEvent)`
 - `(Player)-[:SCORED]->(GameEvent)` *(Applies when event `type == 'Goals'`)*
-- `(Player)-[:ASSISTED]->(GameEvent)` *(Applies when event `type == 'Goals'` with assist)*
 - `(Player)-[:SUBBED_OUT]->(GameEvent)` *(Applies when event `type == 'Substitutions'` for outgoing player)*
-- `(Player)-[:SUBBED_IN]->(GameEvent)` *(Applies when event `type == 'Substitutions'` for incoming player)*
 - `(Player)-[:RECEIVED_CARD]->(GameEvent)` *(Applies when event `type == 'Cards'`)*
 
 ---
