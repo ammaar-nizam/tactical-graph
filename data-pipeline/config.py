@@ -117,6 +117,16 @@ class Settings(BaseSettings):
         description="Maximum backoff wait time in seconds for retries",
     )
 
+    # Gemini & LLM Configuration
+    GEMINI_API_KEY: Optional[str] = Field(
+        default=None,
+        description="Google AI Studio Gemini API Key",
+    )
+    GRAPH_LLM_MODEL: str = Field(
+        default="gemini-3.6-flash",
+        description="LLM model identifier for GraphRAG agent",
+    )
+
     model_config = SettingsConfigDict(
         env_file=(_ENV_FILE_PATH, ".env", "../.env"),
         env_file_encoding="utf-8",

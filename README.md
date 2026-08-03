@@ -1,6 +1,6 @@
 # TacticalGraph
 
-TacticalGraph is a high-performance Knowledge Graph (Neo4j) data ingestion engine and GraphRAG platform designed for football/soccer analytics using Kaggle Transfermarkt data.
+TacticalGraph is a high-performance Knowledge Graph (Neo4j) data ingestion engine and GraphRAG platform designed for tactical football/soccer analytics using Kaggle Transfermarkt data.
 
 > Developed with **Antigravity CLI**.
 
@@ -13,12 +13,13 @@ tactical-graph/
 ├── data-pipeline/               # Ingestion pipeline & Neo4j ETL loaders
 │   ├── config.py                # Pydantic BaseSettings (.env loading & validation)
 │   ├── database.py              # Neo4j driver pool, session execution & retries
-│   ├── dataset.py               # DatasetManager (Kaggle dataset download, caching & retries via kagglehub)
+│   ├── dataset.py               # DatasetManager (Kaggle dataset download & retries via kagglehub)
 │   ├── schema.py                # SchemaInstaller (uniqueness constraints & indexes)
 │   ├── watermark.py             # WatermarkManager for delta incremental updates
 │   ├── utils.py                 # Subgraph extraction & DEV_MODE filtering helpers
 │   ├── main.py                  # CLI pipeline orchestrator
 │   ├── schema.md                # Graph Data Model & Cypher Schema specification
+│   ├── cyphers.json             # Test Cypher query suite & few-shot examples
 │   └── loaders/                 # Domain-grouped ETL loaders
 │       ├── base_loader.py       # Abstract BaseLoader class
 │       ├── reference_loader.py  # Countries, Competitions, NationalTeams
@@ -27,7 +28,16 @@ tactical-graph/
 │       ├── matches_loader.py    # Games, Club Games
 │       ├── appearances_loader.py# Appearances & Game Lineups
 │       └── game_events_loader.py# Game Events
-├── graphrag-app/                # Reserved for LLM engine and API layer
+├── graphrag-app/                # GraphRAG LLM Engine & REST API
+│   ├── config.py                # GraphRAGSettings Pydantic model
+│   ├── models.py                # Pydantic request/response & structured LLM output models
+│   ├── few_shot_bank.py         # Curated NL -> Cypher few-shot prompt bank
+│   ├── agent.py                 # GraphRAG agent orchestrator (LLM routing & synthesis)
+│   ├── main.py                  # FastAPI REST API & CLI entry point
+│   ├── requirements.txt         # Pinned GraphRAG Python dependencies
+│   └── tools/                   # LangChain & custom tool modules
+│       ├── custom_text2cypher.py# Read-only Text-to-Cypher translation tool
+│       └── dedicated_templates.py# Pre-written scouting candidate replacement tool
 ├── .env.example                 # Environment variable template
 └── README.md
 ```
@@ -37,7 +47,7 @@ tactical-graph/
 ## Setup & Environment Configuration
 
 ### 1. Environment File setup
-Copy `.env.example` to `.env` and fill in your Neo4j database credentials and optional Kaggle API token:
+Copy `.env.example` to `.env` and fill in your Neo4j database credentials, Kaggle handles, and Gemini API key:
 ```bash
 cp .env.example .env
 ```
@@ -45,47 +55,48 @@ cp .env.example .env
 Configuration parameters in `.env`:
 ```env
 # Neo4j Database Credentials & Connection Endpoint
-NEO4J_URI=bolt://localhost:7687
+NEO4J_URI=neo4j+s://4446f270.databases.neo4j.io
 NEO4J_USER=neo4j
-NEO4J_PASSWORD=password
+NEO4J_PASSWORD=your_password
 NEO4J_DATABASE=neo4j
 
-# Kaggle Dataset Handles (Optional Kaggle API token for authentication)
-KAGGLE_API_TOKEN=your_kaggle_api_token_here
+# Kaggle Dataset Handles
 KAGGLE_DATASET_HANDLE=davidcariboo/player-scores
 TRANSFER_DATASET_HANDLE=mexwell/football-player-transfers
+
+# Gemini & LLM Configuration
+GEMINI_API_KEY=your_gemini_api_key
+GRAPH_LLM_MODEL=gemini-3.6-flash
 ```
 
-### 2. Python Virtual Environment
+### 2. Python Virtual Environment Setup
 ```bash
 python -m venv .venv
+
 # On Windows:
 .venv\Scripts\activate
 # On Linux/macOS:
 source .venv/bin/activate
 
+# Install dependencies for both data pipeline and GraphRAG application:
 pip install -r data-pipeline/requirements.txt
+pip install -r graphrag-app/requirements.txt
 ```
 
 ---
 
 ## Running the Data Pipeline
 
-The pipeline is orchestrated via `data-pipeline/main.py`. By default, `DatasetManager` dynamically fetches and caches the primary dataset (`davidcariboo/player-scores`) and supplementary transfer dataset (`mexwell/football-player-transfers`) from Kaggle via `kagglehub` (with tenacity exponential backoff retries for rate limits and automatic local caching to bypass redundant downloads).
+The pipeline is orchestrated via `data-pipeline/main.py`. `DatasetManager` dynamically fetches and caches datasets from Kaggle via `kagglehub`.
 
 ```bash
 cd data-pipeline
 ```
 
 ### Full Ingestion Mode
-Loads all raw CSV data into Neo4j (automatically downloads/retrieves cached datasets via `kagglehub`):
+Loads all raw CSV data into Neo4j:
 ```bash
 python main.py --mode full
-```
-
-*Note: You can optionally pass `--data-dir PATH` to override dynamic kagglehub retrieval and use a custom local CSV directory:*
-```bash
-python main.py --mode full --data-dir ./data
 ```
 
 ### Incremental Ingestion Mode
@@ -95,13 +106,85 @@ python main.py --mode incremental
 ```
 
 ### Development Mode (`DEV_MODE`)
-Sub-filters the dataset to a single target competition (default: Premier League `'GB1'`) to allow rapid testing while maintaining complete referential integrity:
+Sub-filters the dataset to a single target competition (default: Premier League `'GB1'`):
 ```bash
-# Filter Premier League (GB1) subgraph
 python main.py --dev
+```
 
-# Filter target competition (e.g. La Liga 'ES1')
-python main.py --dev-comp ES1
+---
+
+## Running the GraphRAG Application
+
+The GraphRAG framework operates as a FastAPI REST application and a programmatic Python library.
+
+### 1. Starting the FastAPI REST Server
+
+From the project root directory:
+```bash
+python graphrag-app/main.py
+```
+Or directly with Uvicorn:
+```bash
+uvicorn graphrag-app.main:app --reload --port 8000
+```
+Interactive Swagger documentation is available at `http://localhost:8000/docs`.
+
+### 2. REST API Endpoints
+
+#### `GET /health`
+Returns system operational status, active LLM model, and live Neo4j driver connectivity.
+
+#### `POST /query`
+Processes natural language questions, translates them to validated read-only Cypher or routes to tactical tools, executes against Neo4j, and returns synthesized insights.
+
+**Example Request:**
+```json
+POST /query
+Content-Type: application/json
+
+{
+  "query": "Who would have been a better defensive midfielder for Manchester United instead of Marouane Fellaini in 2013/14?"
+}
+```
+
+**Example Response:**
+```json
+{
+  "answer": "Based on data from TacticalGraph, Arturo Vidal (€35M valuation, 40.3% win rate, 38 goal contributions) offered a superior tactical fit over Marouane Fellaini (€28M valuation, 30.6% win rate, 34 goal contributions)...",
+  "cypher_used": "DYNAMIC_REPLACEMENT_CANDIDATES_CYPHER (Parameterized)",
+  "raw_data": [ ... ],
+  "execution_time_ms": 4662.5
+}
+```
+
+#### `POST /scout/replacements`
+Dedicated endpoint calling `get_replacement_candidates` tool directly for fast player scouting without LLM orchestration overhead.
+
+**Example Request:**
+```json
+POST /scout/replacements
+Content-Type: application/json
+
+{
+  "target_club": "Manchester United",
+  "season": 2012,
+  "position": "Midfield",
+  "benchmark_player": "Fellaini",
+  "min_minutes": 1000
+}
+```
+
+### 3. Programmatic Python Entry Point
+
+Import and call `query_graphrag` in your Python code:
+
+```python
+from graphrag import query_graphrag
+
+response = query_graphrag("List top 5 transfers in history")
+
+print("Cypher Executed:", response.cypher_used)
+print("Answer:", response.answer)
 ```
 
 ---
