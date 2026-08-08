@@ -12,7 +12,7 @@ from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from config import settings
-from database import get_neo4j_driver
+from database import execute_cypher_query
 from few_shot_bank import get_few_shot_prompt
 from models import CypherGenerationOutput
 from utils import format_custom_cypher_records
@@ -33,41 +33,39 @@ def get_schema() -> str:
     Returns:
         Formatted string summarizing graph schema definitions.
     """
-    driver = get_neo4j_driver()
-    with driver.session(database=settings.NEO4J_DATABASE) as session:
-        # Query node labels and property keys via Cypher procedure
-        node_records = session.run(
-            "CALL db.schema.nodeTypeProperties() YIELD nodeType, propertyName "
-            "RETURN nodeType, collect(propertyName) AS properties"
-        ).data()
+    # Query node labels and property keys via Cypher procedure
+    node_records = execute_cypher_query(
+        "CALL db.schema.nodeTypeProperties() YIELD nodeType, propertyName "
+        "RETURN nodeType, collect(propertyName) AS properties"
+    )
 
-        # Query relationship types and property keys via Cypher procedure
-        rel_records = session.run(
-            "CALL db.schema.relTypeProperties() YIELD relType, propertyName "
-            "RETURN relType, collect(propertyName) AS properties"
-        ).data()
+    # Query relationship types and property keys via Cypher procedure
+    rel_records = execute_cypher_query(
+        "CALL db.schema.relTypeProperties() YIELD relType, propertyName "
+        "RETURN relType, collect(propertyName) AS properties"
+    )
 
-        schema_parts = ["### GRAPH SCHEMA DEFINITIONS (Extracted dynamically via Cypher):", ""]
+    schema_parts = ["### GRAPH SCHEMA DEFINITIONS (Extracted dynamically via Cypher):", ""]
 
-        if node_records:
-            schema_parts.append("Node Labels & Properties:")
-            for row in node_records:
-                node_label = row.get("nodeType", "")
-                props = ", ".join(row.get("properties", []))
-                schema_parts.append(f"- {node_label} ({props})")
-            schema_parts.append("")
+    if node_records:
+        schema_parts.append("Node Labels & Properties:")
+        for row in node_records:
+            node_label = row.get("nodeType", "")
+            props = ", ".join(row.get("properties", []))
+            schema_parts.append(f"- {node_label} ({props})")
+        schema_parts.append("")
 
-        if rel_records:
-            schema_parts.append("Relationships & Edge Properties:")
-            for row in rel_records:
-                rel_type = row.get("relType", "")
-                props = ", ".join(row.get("properties", []))
-                if props:
-                    schema_parts.append(f"- {rel_type} {{{props}}}")
-                else:
-                    schema_parts.append(f"- {rel_type}")
+    if rel_records:
+        schema_parts.append("Relationships & Edge Properties:")
+        for row in rel_records:
+            rel_type = row.get("relType", "")
+            props = ", ".join(row.get("properties", []))
+            if props:
+                schema_parts.append(f"- {rel_type} {{{props}}}")
+            else:
+                schema_parts.append(f"- {rel_type}")
 
-        return "\n".join(schema_parts)
+    return "\n".join(schema_parts)
 
 
 class CustomText2CypherTool:
@@ -174,10 +172,8 @@ Return your response strictly adhering to the CypherGenerationOutput schema.
         Returns:
             List of record dicts.
         """
-        driver = get_neo4j_driver()
-        with driver.session(database=settings.NEO4J_DATABASE) as session:
-            result = session.run(cypher, parameters or {})
-            return [record.data() for record in result]
+        return execute_cypher_query(cypher, parameters)
+
 
 
     def run(self, user_question: str) -> Tuple[CypherGenerationOutput, List[Dict[str, Any]]]:

@@ -62,9 +62,10 @@ def format_scouting_report(records: List[Dict[str, Any]], params: Dict[str, Any]
         bm = benchmarks[0]
         val = bm.get("approxValuation")
         val_str = f"EUR {val:,.0f}" if val is not None else "N/A"
+        age_str = f"{bm.get('age')} yrs" if bm.get("age") is not None else "N/A"
         report_lines.extend([
             f"1. Benchmark Baseline ({bm.get('candidate')}):",
-            f"   - Role / Sub-Position: {bm.get('subPosition', 'N/A')}",
+            f"   - Age in Season: {age_str} | Role / Sub-Position: {bm.get('subPosition', 'N/A')}",
             f"   - Formation Fit: {bm.get('formationFitPct', 0.0)}% | Team Win Rate: {bm.get('winRatePct', 0.0)}%",
             f"   - Market Valuation: {val_str} | Goal Contributions: {bm.get('goals', 0)} goals, {bm.get('assists', 0)} assists ({bm.get('contributions', 0)} total)",
             "",
@@ -75,13 +76,15 @@ def format_scouting_report(records: List[Dict[str, Any]], params: Dict[str, Any]
         for i, c in enumerate(candidates, 1):
             val = c.get("approxValuation")
             val_str = f"EUR {val:,.0f}" if val is not None else "N/A"
+            cand_age = f"{c.get('age')} yrs" if c.get("age") is not None else "N/A"
             report_lines.extend([
                 f"   {i}) {c.get('candidate')} ({c.get('subPosition', 'N/A')}):",
                 f"      - Match Activity: {c.get('totalMinutes', 0)} mins in {c.get('totalMatches', 0)} matches",
                 f"      - Formation Compatibility: {c.get('formationFitPct', 0.0)}% | Team Win Rate: {c.get('winRatePct', 0.0)}%",
                 f"      - Market Valuation: {val_str} | Goal Contributions: {c.get('goals', 0)} goals, {c.get('assists', 0)} assists ({c.get('contributions', 0)} total)",
-                f"      - Physical Profile: {c.get('heightCm', 'N/A')} cm | Preferred Foot: {c.get('preferredFoot', 'N/A')}",
+                f"      - Profile & Age: Age: {cand_age} | Height: {c.get('heightCm', 'N/A')} cm | Preferred Foot: {c.get('preferredFoot', 'N/A')}",
             ])
+
         report_lines.append("")
         top_cand = candidates[0].get("candidate")
         report_lines.extend([
