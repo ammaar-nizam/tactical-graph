@@ -8,27 +8,18 @@ and direct tactical player scouting without LLM orchestration overhead.
 import io
 import logging
 import sys
-import time
-from pathlib import Path
 from typing import Any, Dict, List
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
 import uvicorn
-
-# Ensure graphrag-app and data-pipeline are on sys.path for seamless imports
-_APP_DIR = Path(__file__).resolve().parent
-_ROOT_DIR = _APP_DIR.parent
-_DATA_PIPELINE_DIR = _ROOT_DIR / "data-pipeline"
-
-sys.path.insert(0, str(_APP_DIR))
-sys.path.insert(0, str(_DATA_PIPELINE_DIR))
 
 from agent import query_graphrag
 from config import settings
+from database import close_neo4j_driver, get_neo4j_driver
 from models import GraphRAGResponse, HealthResponse, QueryRequest, ReplacementCandidatesInput
-from tools.dedicated_templates import get_replacement_candidates
+from tools.dedicated_templates import execute_replacement_candidates_query
 
 # Configure UTF-8 output encoding for Windows compatibility
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -36,15 +27,26 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="repla
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    format="%(asctime)s [%(levelname)s] %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI application
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    FastAPI lifespan context manager handling startup and graceful driver shutdown.
+    """
+    yield
+    close_neo4j_driver()
+
+
+# Initialize FastAPI application with lifespan context manager
 app = FastAPI(
     title="TacticalGraph GraphRAG API",
     version="1.0.0",
     description="GraphRAG LLM & Analytics REST API for Tactical Football Knowledge Graph",
+    lifespan=lifespan,
 )
 
 # Enable CORS for local frontend integration
@@ -57,7 +59,6 @@ app.add_middleware(
 )
 
 
-
 @app.get("/health", response_model=HealthResponse, tags=["Monitoring"])
 def health_check() -> HealthResponse:
     """
@@ -65,11 +66,8 @@ def health_check() -> HealthResponse:
     """
     neo4j_connected = False
     try:
-        from neo4j import GraphDatabase
-        uri = settings.NEO4J_URI.replace("neo4j+s://", "neo4j+ssc://")
-        driver = GraphDatabase.driver(uri, auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD))
+        driver = get_neo4j_driver()
         driver.verify_connectivity()
-        driver.close()
         neo4j_connected = True
     except Exception as e:
         logger.warning("Neo4j connectivity check failed during /health: %s", e)
@@ -81,13 +79,14 @@ def health_check() -> HealthResponse:
     )
 
 
-@app.post("/query", response_model=GraphRAGResponse, tags=["GraphRAG Agent"])
+
+@app.post("/chat", response_model=GraphRAGResponse, tags=["GraphRAG Agent"])
 def execute_graphrag_query(request: QueryRequest) -> GraphRAGResponse:
     """
     Natural Language GraphRAG query endpoint.
 
     Translates user prompt to Cypher or routes to tactical tools, executes query against Neo4j,
-    and returns a structured response payload containing natural language answer, Cypher used, and raw data.
+    and returns a structured response payload containing natural language answer and Cypher used.
     """
     if not request.query or not request.query.strip():
         raise HTTPException(
@@ -96,11 +95,11 @@ def execute_graphrag_query(request: QueryRequest) -> GraphRAGResponse:
         )
 
     try:
-        logger.info("Received API /query request: '%s'", request.query)
+        logger.info("Received API /chat request: '%s'", request.query)
         response = query_graphrag(request.query)
         return response
     except Exception as e:
-        logger.error("Error executing /query endpoint: %s", e, exc_info=True)
+        logger.error("Error executing /chat endpoint: %s", e, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process GraphRAG query: {str(e)}",
@@ -116,7 +115,7 @@ def scout_replacement_candidates(payload: ReplacementCandidatesInput) -> List[Di
     """
     try:
         logger.info("Received API /scout/replacements request: %s", payload.model_dump())
-        records = get_replacement_candidates.invoke(payload.model_dump())
+        records = execute_replacement_candidates_query(payload.model_dump())
         return records
     except Exception as e:
         logger.error("Error executing /scout/replacements endpoint: %s", e, exc_info=True)

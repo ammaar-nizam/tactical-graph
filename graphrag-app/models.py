@@ -37,18 +37,18 @@ class ReplacementCandidatesInput(BaseModel):
     )
     season: int = Field(
         ...,
-        description="The starting year of the season to analyze (e.g. 2012 for 2012/13).",
-        examples=[2012, 2013, 2017],
+        description="The starting year of the season to analyze (e.g. 2014 for 2014/15).",
+        examples=[2012, 2013, 2014, 2017],
     )
     position: str = Field(
         ...,
-        description="Player primary position (e.g. 'Midfield', 'Attack', 'Defender').",
-        examples=["Midfield", "Attack", "Defender"],
+        description="Player primary position (e.g. 'Attack', 'Midfield', 'Defender').",
+        examples=["Attack", "Midfield", "Defender"],
     )
     benchmark_player: str = Field(
         ...,
-        description="Name of the benchmark transfer target player to include for comparison (e.g. 'Fellaini').",
-        examples=["Fellaini", "Coutinho"],
+        description="Name of the benchmark transfer target player to include for comparison (e.g. 'Falcao', 'Fellaini').",
+        examples=["Falcao", "Fellaini", "Coutinho"],
     )
     min_minutes: int = Field(
         default=1000,
@@ -58,37 +58,29 @@ class ReplacementCandidatesInput(BaseModel):
 
 class GraphRAGResponse(BaseModel):
     """
-    Structured final response returned by the GraphRAG agent.
+    Structured response payload returned by the GraphRAG agent API.
     """
 
     answer: str = Field(
         ...,
-        description="Natural language answer synthesized from graph query results.",
+        description="Natural language scout report or answer synthesized from graph query results.",
     )
     cypher_used: Optional[str] = Field(
         default=None,
         description="The exact Cypher query executed against Neo4j (if applicable).",
     )
-    raw_data: Optional[List[Dict[str, Any]]] = Field(
-        default=None,
-        description="Raw list of record dicts returned by Neo4j query execution.",
-    )
-    execution_time_ms: float = Field(
-        ...,
-        description="Total execution latency in milliseconds.",
-    )
 
 
 class QueryRequest(BaseModel):
     """
-    Pydantic request payload for /query API endpoint.
+    Pydantic request payload for /chat API endpoint.
     """
 
     query: str = Field(
         ...,
         description="Natural language question to ask the GraphRAG agent.",
         examples=[
-            "Who would have been a better defensive midfielder for Manchester United instead of Marouane Fellaini in 2013/14?",
+            "Who would have been a better centre forward for Manchester United instead of Radamel Falcao in 2014/15 season?",
             "List top 5 transfers in history",
         ],
     )

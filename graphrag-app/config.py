@@ -49,8 +49,12 @@ class GraphRAGSettings(BaseSettings):
         description="Google AI Studio Gemini API Key",
     )
     GRAPH_LLM_MODEL: str = Field(
-        default="gemini-3.6-flash",
+        default="gemini-1.5-flash",
         description="LLM model identifier for GraphRAG agent",
+    )
+    MAX_OUTPUT_TOKENS: int = Field(
+        default=2048,
+        description="Maximum output token limit",
     )
 
     model_config = SettingsConfigDict(
@@ -72,6 +76,7 @@ class GraphRAGSettings(BaseSettings):
         logger.info("GraphRAG Settings initialized.")
         logger.info("  Neo4j URI: %s", self.NEO4J_URI)
         logger.info("  LLM Model: %s", self.GRAPH_LLM_MODEL)
+        logger.info("  Max Output Tokens: %d", self.MAX_OUTPUT_TOKENS)
         logger.info("  Gemini API Key: %s", masked_key)
 
 

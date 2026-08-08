@@ -30,17 +30,30 @@ tactical-graph/
 │       └── game_events_loader.py# Game Events
 ├── graphrag-app/                # GraphRAG LLM Engine & REST API
 │   ├── config.py                # GraphRAGSettings Pydantic model
+│   ├── database.py              # Application-wide single shared Neo4j driver singleton
+│   ├── utils.py                 # Response text formatters & clean text extraction helpers
 │   ├── models.py                # Pydantic request/response & structured LLM output models
 │   ├── few_shot_bank.py         # Curated NL -> Cypher few-shot prompt bank
-│   ├── agent.py                 # GraphRAG agent orchestrator (LLM routing & synthesis)
-│   ├── main.py                  # FastAPI REST API & CLI entry point
+│   ├── agent.py                 # GraphRAG agent router (tool selection & domain guardrails)
+│   ├── main.py                  # FastAPI REST API & lifespan shutdown handler
 │   ├── requirements.txt         # Pinned GraphRAG Python dependencies
 │   └── tools/                   # LangChain & custom tool modules
-│       ├── custom_text2cypher.py# Read-only Text-to-Cypher translation tool
-│       └── dedicated_templates.py# Pre-written scouting candidate replacement tool
+│       ├── custom_text2cypher.py# Dynamic Cypher schema extraction & read-only translation tool
+│       └── dedicated_templates.py# Encapsulated player scouting parameter extraction & query tool
 ├── .env.example                 # Environment variable template
 └── README.md
 ```
+
+---
+
+## Architecture & Features
+
+- **Application-Wide Driver Singleton**: Centralized shared Neo4j driver pool (`database.py`) initialized once on demand and reused across all tools and API endpoints with connection pooling and graceful FastAPI lifespan shutdown.
+- **Dynamic Cypher Schema Introspection**: `CustomText2CypherTool` extracts active graph node labels, relationship types, and properties directly from Neo4j via Cypher procedures (`CALL db.schema.nodeTypeProperties()`) rather than static schema files.
+- **Strict Domain Scope Guardrails**: Rejects out-of-scope non-football prompts (general knowledge, coding, weather, politics) in code logic without making database calls or executing Cypher queries.
+- **Encapsulated Modular Tools**:
+  - `get_replacement_candidates`: Encapsulates parameter extraction LLM calls, prior-season scouting rule calculations, multi-step Cypher execution, and executive report formatting.
+  - `query_graph_with_custom_cypher`: Handles Text-to-Cypher generation, read-only security validation, Cypher execution, and clean text response formatting.
 
 ---
 
@@ -132,14 +145,14 @@ Interactive Swagger documentation is available at `http://localhost:8000/docs`.
 ### 2. REST API Endpoints
 
 #### `GET /health`
-Returns system operational status, active LLM model, and live Neo4j driver connectivity.
+Returns system operational status, active LLM model, and live Neo4j driver connectivity using the application driver pool.
 
-#### `POST /query`
-Processes natural language questions, translates them to validated read-only Cypher or routes to tactical tools, executes against Neo4j, and returns synthesized insights.
+#### `POST /chat`
+Processes natural language questions, routes to appropriate tools, executes Cypher queries against Neo4j, and returns structured `GraphRAGResponse` payloads. Rejects out-of-scope non-football queries.
 
 **Example Request:**
 ```json
-POST /query
+POST /chat
 Content-Type: application/json
 
 {
@@ -150,15 +163,13 @@ Content-Type: application/json
 **Example Response:**
 ```json
 {
-  "answer": "Based on data from TacticalGraph, Arturo Vidal (€35M valuation, 40.3% win rate, 38 goal contributions) offered a superior tactical fit over Marouane Fellaini (€28M valuation, 30.6% win rate, 34 goal contributions)...",
-  "cypher_used": "DYNAMIC_REPLACEMENT_CANDIDATES_CYPHER (Parameterized)",
-  "raw_data": [ ... ],
-  "execution_time_ms": 4662.5
+  "answer": "Executive Scouting Report: Replacement Candidates for Fellaini (Manchester United, Season 2012/2013)\n\n1. Benchmark Baseline (Fellaini):\n   - Role / Sub-Position: Defensive Midfield\n   - Formation Fit: 30.6% | Team Win Rate: 50.0%\n   - Market Valuation: EUR 28,000,000 | Goal Contributions: 11 goals, 5 assists (16 total)\n\n2. Positional Scouting Analysis (Top Replacement Candidates):\n   1) Arturo Vidal (Central Midfield):\n      - Match Activity: 2450 mins in 31 matches\n      - Formation Compatibility: 85.0% | Team Win Rate: 72.5%\n      - Market Valuation: EUR 35,000,000 | Goal Contributions: 10 goals, 8 assists (18 total)\n\n3. Final Recruitment Recommendation:\n   Primary recruitment target is Arturo Vidal, offering the optimal sub-position match, tactical formation fit, and team win-rate compatibility for Manchester United.",
+  "cypher_used": "DYNAMIC_REPLACEMENT_CANDIDATES_CYPHER"
 }
 ```
 
 #### `POST /scout/replacements`
-Dedicated endpoint calling `get_replacement_candidates` tool directly for fast player scouting without LLM orchestration overhead.
+Dedicated endpoint executing dynamic scouting candidate Cypher queries directly via `execute_replacement_candidates_query` without LLM orchestration overhead.
 
 **Example Request:**
 ```json
@@ -179,7 +190,7 @@ Content-Type: application/json
 Import and call `query_graphrag` in your Python code:
 
 ```python
-from graphrag import query_graphrag
+from agent import query_graphrag
 
 response = query_graphrag("List top 5 transfers in history")
 

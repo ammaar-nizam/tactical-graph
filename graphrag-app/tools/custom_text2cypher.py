@@ -5,26 +5,19 @@ validated, read-only Neo4j Cypher queries.
 
 import logging
 import re
-import sys
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
-from neo4j import GraphDatabase
-
-# Adjust path to import config and models
-_APP_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_APP_DIR))
 
 from config import settings
-from models import CypherGenerationOutput
+from database import get_neo4j_driver
 from few_shot_bank import get_few_shot_prompt
+from models import CypherGenerationOutput
+from utils import format_custom_cypher_records
 
 logger = logging.getLogger(__name__)
-
-# Path to schema reference
-_SCHEMA_MD_PATH = _APP_DIR.parent / "data-pipeline" / "schema.md"
 
 # Forbidden write/mutation Cypher keywords
 MUTATION_KEYWORDS = {
@@ -32,32 +25,49 @@ MUTATION_KEYWORDS = {
 }
 
 
-def load_schema_description() -> str:
+def get_schema() -> str:
     """
-    Load graph schema definitions from data-pipeline/schema.md.
+    Extract dynamic graph schema (Node Labels, Relationship Types, and Properties)
+    from Neo4j database using Cypher schema introspection procedures.
 
     Returns:
-        String containing markdown schema text or default schema summary.
+        Formatted string summarizing graph schema definitions.
     """
-    if _SCHEMA_MD_PATH.exists():
-        try:
-            return _SCHEMA_MD_PATH.read_text(encoding="utf-8")
-        except Exception as e:
-            logger.warning("Failed to read schema.md: %s", e)
+    driver = get_neo4j_driver()
+    with driver.session(database=settings.NEO4J_DATABASE) as session:
+        # Query node labels and property keys via Cypher procedure
+        node_records = session.run(
+            "CALL db.schema.nodeTypeProperties() YIELD nodeType, propertyName "
+            "RETURN nodeType, collect(propertyName) AS properties"
+        ).data()
 
-    return (
-        "Node Labels: :Player(id, name, position, subPosition, heightInCm, foot, dateOfBirth, countryOfCitizenship)\n"
-        ":Club(id, name, code, totalMarketValue, squadSize)\n"
-        ":Game(id, season, date, homeClubGoals, awayClubGoals, homeClubFormation, awayClubFormation)\n"
-        ":GameEvent(id, type, minute, description)\n"
-        ":PlayerValuation(id, date, marketValueInEur)\n"
-        ":Competition(id, name, type, subType), :Country(id, name), :NationalTeam(id, name)\n"
-        "Relationships: (Player)-[:PLAYS_FOR]->(Club), (Player)-[:HAS_VALUATION]->(PlayerValuation),\n"
-        "(Player)-[:TRANSFERRED_TO {transferFee, transferDate, transferSeason, fromClubName}]->(Club),\n"
-        "(Player)-[:APPEARED_IN {minutesPlayed, goals, assists, yellowCards, redCards, position, teamCaptain}]->(Game),\n"
-        "(Club)-[:PLAYED_IN {hosting, isWin, ownGoals, opponentGoals}]->(Game),\n"
-        "(Game)-[:PART_OF_COMPETITION]->(Competition), (Player)-[:SCORED]->(GameEvent)-[:OCCURRED_IN]->(Game)"
-    )
+        # Query relationship types and property keys via Cypher procedure
+        rel_records = session.run(
+            "CALL db.schema.relTypeProperties() YIELD relType, propertyName "
+            "RETURN relType, collect(propertyName) AS properties"
+        ).data()
+
+        schema_parts = ["### GRAPH SCHEMA DEFINITIONS (Extracted dynamically via Cypher):", ""]
+
+        if node_records:
+            schema_parts.append("Node Labels & Properties:")
+            for row in node_records:
+                node_label = row.get("nodeType", "")
+                props = ", ".join(row.get("properties", []))
+                schema_parts.append(f"- {node_label} ({props})")
+            schema_parts.append("")
+
+        if rel_records:
+            schema_parts.append("Relationships & Edge Properties:")
+            for row in rel_records:
+                rel_type = row.get("relType", "")
+                props = ", ".join(row.get("properties", []))
+                if props:
+                    schema_parts.append(f"- {rel_type} {{{props}}}")
+                else:
+                    schema_parts.append(f"- {rel_type}")
+
+        return "\n".join(schema_parts)
 
 
 class CustomText2CypherTool:
@@ -84,25 +94,25 @@ class CustomText2CypherTool:
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY is missing. Set it in .env or pass to CustomText2CypherTool.")
 
-        # Initialize LangChain Gemini LLM with structured output
+        # Initialize LangChain Gemini LLM with structured output and max_output_tokens
         self.llm = ChatGoogleGenerativeAI(
             model=self.model_name,
             google_api_key=self.api_key,
             temperature=0.0,
+            max_output_tokens=settings.MAX_OUTPUT_TOKENS,
+            thinking_level="low",
         )
+
         self.structured_llm = self.llm.with_structured_output(CypherGenerationOutput)
 
-        # Build Neo4j connection URI (using SSL fallback if required on Windows)
-        self.uri = settings.NEO4J_URI.replace("neo4j+s://", "neo4j+ssc://")
-        self.auth = (settings.NEO4J_USER, settings.NEO4J_PASSWORD)
-
-        # Load schema and few-shot prompt bank
-        self.schema_text = load_schema_description()
+        # Dynamically extract graph schema via Cypher procedures & load few-shot prompt bank
+        self.schema_text = get_schema()
         self.few_shot_prompt = get_few_shot_prompt()
+
 
     def _build_system_instructions(self) -> str:
         """
-        Build concise, direct system instructions for Gemini 3.6 Flash.
+        Build concise, direct system instructions for Text-to-Cypher generation.
         """
         return f"""You are a specialized Neo4j Cypher generation expert for a Football Knowledge Graph (TacticalGraph).
 Your task is to translate user natural language questions into precise, production-ready, read-only Cypher queries.
@@ -111,12 +121,15 @@ Your task is to translate user natural language questions into precise, producti
 {self.schema_text}
 
 ### RULES & CONVENTIONS:
-1. Generate STRICTLY READ-ONLY queries using MATCH, OPTIONAL MATCH, WHERE, WITH, RETURN, ORDER BY, LIMIT.
-2. NEVER use write/mutation clauses: CREATE, MERGE, DELETE, DETACH, SET, REMOVE, DROP.
-3. Case-insensitive string matching: Always use toLower(n.prop) CONTAINS 'term' for names (e.g. toLower(p.name) CONTAINS 'fellaini').
-4. Filter out stub/null names: Include `WHERE p.name IS NOT NULL` or `c.name IS NOT NULL` when querying players/clubs.
-5. `isWin` on [:PLAYED_IN] is integer 1 or 0 (NOT boolean true/false).
-6. Convert numeric/string properties safely: use `toLower(toString(p.subPosition))` for position checks to handle null/NaN float values safely.
+1. Generate strictly read-only queries using MATCH, OPTIONAL MATCH, WHERE, WITH, RETURN, ORDER BY, LIMIT.
+2. Never use write/mutation clauses: CREATE, MERGE, DELETE, DETACH, SET, REMOVE, DROP.
+3. Strict limit clause: Always append `LIMIT 5` (or lower) to every generated query unless explicitly requested otherwise.
+4. Case-insensitive string matching: Always use toLower(n.prop) CONTAINS 'term' for names (e.g. toLower(p.name) CONTAINS 'fellaini').
+5. Filter out stub/null names: Include `WHERE p.name IS NOT NULL` or `c.name IS NOT NULL` when querying players/clubs.
+6. `isWin` on [:PLAYED_IN] is integer 1 or 0 (NOT boolean true/false).
+7. Convert numeric/string properties safely: use `toLower(toString(p.subPosition))` for position checks.
+8. Domain boundary & Out-of-scope rule: The domain is strictly football (soccer). If the user question is unrelated to football or non-queryable against the graph schema, do NOT invent queries for out-of-scope topics.
+
 
 ### FEW-SHOT EXAMPLES:
 {self.few_shot_prompt}
@@ -161,13 +174,11 @@ Return your response strictly adhering to the CypherGenerationOutput schema.
         Returns:
             List of record dicts.
         """
-        driver = GraphDatabase.driver(self.uri, auth=self.auth)
-        try:
-            with driver.session(database=settings.NEO4J_DATABASE) as session:
-                result = session.run(cypher, parameters or {})
-                return [record.data() for record in result]
-        finally:
-            driver.close()
+        driver = get_neo4j_driver()
+        with driver.session(database=settings.NEO4J_DATABASE) as session:
+            result = session.run(cypher, parameters or {})
+            return [record.data() for record in result]
+
 
     def run(self, user_question: str) -> Tuple[CypherGenerationOutput, List[Dict[str, Any]]]:
         """
@@ -202,3 +213,23 @@ Return your response strictly adhering to the CypherGenerationOutput schema.
         logger.info("Query returned %d record(s).", len(raw_data))
 
         return output, raw_data
+
+
+@tool("query_graph_with_custom_cypher")
+
+def query_graph_with_custom_cypher(question: str) -> str:
+    """
+    Execute a custom natural language query on the TacticalGraph knowledge graph by generating read-only Cypher.
+    Use this tool for general football queries, player statistics, match results, transfers, and general club info.
+
+    Args:
+        question: Natural language query string.
+
+    Returns:
+        Formatted string containing generated Cypher query and execution record results.
+    """
+    tool_inst = CustomText2CypherTool()
+    out, data = tool_inst.run(question)
+    return format_custom_cypher_records(out.cypher_query, data)
+
+
