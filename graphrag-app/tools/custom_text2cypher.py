@@ -19,6 +19,11 @@ from utils import format_custom_cypher_records
 
 logger = logging.getLogger(__name__)
 
+# Standard user-friendly fallback error message
+USER_FRIENDLY_ERROR_MESSAGE = (
+    "I am sorry, I couldn't find what you are looking for. Please try again with a different question."
+)
+
 # Forbidden write/mutation Cypher keywords
 MUTATION_KEYWORDS = {
     "CREATE", "MERGE", "DELETE", "DETACH", "SET", "REMOVE", "DROP", "ALTER", "GRANT", "REVOKE"
@@ -123,7 +128,6 @@ class CustomText2CypherTool:
         self.schema_text = get_schema()
         self.few_shot_prompt = get_few_shot_prompt()
 
-
     def _build_system_instructions(self) -> str:
         """
         Build concise, direct system instructions for Text-to-Cypher generation.
@@ -198,8 +202,6 @@ Return your response strictly adhering to the CypherGenerationOutput schema.
         """
         return execute_cypher_query(cypher, parameters)
 
-
-
     def run(self, user_question: str) -> Tuple[CypherGenerationOutput, List[Dict[str, Any]]]:
         """
         Translate user prompt into Cypher, validate read-only status, execute query, and return structured output.
@@ -250,7 +252,9 @@ def query_graph_with_custom_cypher(question: str) -> str:
     tool_inst = CustomText2CypherTool()
     try:
         out, data = tool_inst.run(question)
+        if not data:
+            return USER_FRIENDLY_ERROR_MESSAGE
         return format_custom_cypher_records(out.cypher_query, data)
     except Exception as e:
         logger.error("Error executing custom Cypher query for question '%s': %s", question, e)
-        return f"Cypher Execution Error: {str(e)}"
+        return USER_FRIENDLY_ERROR_MESSAGE

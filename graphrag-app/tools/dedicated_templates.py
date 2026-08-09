@@ -194,16 +194,22 @@ def get_replacement_candidates(question: str) -> str:
     Returns:
         Formatted Scouting Report string.
     """
-    scout_params = extract_scouting_parameters(question)
-    params = scout_params.model_dump()
+    try:
+        scout_params = extract_scouting_parameters(question)
+        params = scout_params.model_dump()
 
-    # Season rule safeguard check
-    season = params.get("season", 2013)
-    if isinstance(season, int) and season >= 2000:
-        for yr in range(2000, 2030):
-            if str(yr) in question and season == yr:
-                params["season"] = yr - 1
-                break
+        # Season rule safeguard check
+        season = params.get("season", 2013)
+        if isinstance(season, int) and season >= 2000:
+            for yr in range(2000, 2030):
+                if str(yr) in question and season == yr:
+                    params["season"] = yr - 1
+                    break
 
-    records = execute_replacement_candidates_query(params)
-    return format_scouting_report(records, params)
+        records = execute_replacement_candidates_query(params)
+        if not records:
+            return "I am sorry, I couldn't find what you are looking for. Please try again with a different question."
+        return format_scouting_report(records, params)
+    except Exception as e:
+        logger.error("Error executing get_replacement_candidates for question '%s': %s", question, e)
+        return "I am sorry, I couldn't find what you are looking for. Please try again with a different question."

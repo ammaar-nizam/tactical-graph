@@ -46,6 +46,10 @@ SINGLE TOOL EXECUTION RULE:
 - Execute at most ONE tool call per user question.
 - Do NOT retry calling tools or loop if a tool query returns 0 records or no matches found in the database. Synthesize your final natural language answer immediately based on the tool result returned.
 
+ERROR & NO MATCH HANDLING RULE:
+- If a tool output or execution indicates an error or no matching records were found, return exactly this response:
+  "I am sorry, I couldn't find what you are looking for. Please try again with a different question."
+
 RESPONSE FORMATTING INSTRUCTION:
 When formatting responses from retrieved graph database records or tools, synthesize the raw data into a clear, direct, and concise natural language answer matching the user question without raw dictionary strings, debug blocks, or Cypher code.
 """
@@ -73,7 +77,7 @@ class GraphRAGAgent:
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY is missing. Set it in .env or pass to GraphRAGAgent.")
 
-        # Initialize ChatGoogleGenerativeAI with thinking_level="low", max_output_tokens, and max 3 retries
+        # Initialize ChatGoogleGenerativeAI
         self.llm = ChatGoogleGenerativeAI(
             model=self.model_name,
             google_api_key=self.api_key,
@@ -143,7 +147,7 @@ class GraphRAGAgent:
 
         except Exception as exc:
             logger.error("Error during GraphRAG query execution: %s", exc, exc_info=True)
-            answer_text = f"An error occurred while processing your request: {str(exc)}"
+            answer_text = "I am sorry, I couldn't find what you are looking for. Please try again with a different question."
 
         final_answer = answer_text or OUT_OF_SCOPE_RESPONSE
         logger.info("Answer: %s", final_answer)
