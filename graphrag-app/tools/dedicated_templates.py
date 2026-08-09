@@ -22,20 +22,20 @@ logger = logging.getLogger(__name__)
 
 # Dynamic parameterized Cypher template
 DYNAMIC_REPLACEMENT_CANDIDATES_CYPHER = """
-// Step 1: Dynamically determine benchmark player's market valuation, subPosition, and age in the season
-OPTIONAL MATCH (bm:Player)
-WHERE toLower(bm.name) CONTAINS toLower($benchmark_player)
-WITH bm LIMIT 1
+// Step 1: Resolve benchmark player's market valuation, subPosition, and age
+CALL db.index.fulltext.queryNodes('player_name_fulltext', $benchmark_player) YIELD node AS bm, score AS bmScore
+WITH bm ORDER BY bmScore DESC LIMIT 1
 OPTIONAL MATCH (bm)-[:HAS_VALUATION]->(bmVal:PlayerValuation)
 WHERE bmVal.date STARTS WITH toString($season + 1) OR bmVal.date STARTS WITH toString($season)
 WITH bm, avg(bmVal.marketValueInEur) AS bmMarketValuation,
      CASE WHEN bm.dateOfBirth IS NOT NULL AND toString(bm.dateOfBirth) <> 'NaN' THEN ($season - toInteger(left(toString(bm.dateOfBirth), 4))) ELSE NULL END AS bmAge
 
-// Step 2: Dynamically determine target club's primary formation(s) in the given season from Game nodes
-MATCH (targetClub:Club)-[piTarget:PLAYED_IN]->(gTarget:Game)
-WHERE toLower(targetClub.name) CONTAINS toLower($target_club)
-  AND gTarget.season = $season
-WITH bm, bmMarketValuation, bmAge, targetClub, 
+// Step 2: Resolve target club and determine its primary formation(s) in the given season
+CALL db.index.fulltext.queryNodes('club_name_fulltext', $target_club) YIELD node AS targetClub, score AS clubScore
+WITH bm, bmMarketValuation, bmAge, targetClub ORDER BY clubScore DESC LIMIT 1
+MATCH (targetClub)-[piTarget:PLAYED_IN]->(gTarget:Game)
+WHERE gTarget.season = $season
+WITH bm, bmMarketValuation, bmAge, targetClub,
      [x IN collect(DISTINCT CASE WHEN piTarget.hosting = 'Home' THEN gTarget.homeClubFormation ELSE gTarget.awayClubFormation END) WHERE x IS NOT NULL AND toString(x) <> 'NaN'] AS clubFormations
 
 // Step 3: Extract target club's squad roster for that season to exclude existing squad members except benchmark_player
@@ -54,13 +54,13 @@ WHERE (
     OR (bm IS NOT NULL AND candidate = bm)
   )
   AND candidate.subPosition IS NOT NULL
-  AND (NOT candidate IN seasonRoster OR (bm IS NOT NULL AND candidate = bm) OR toLower(candidate.name) CONTAINS toLower($benchmark_player))
+  AND (NOT candidate IN seasonRoster OR (bm IS NOT NULL AND candidate = bm) OR candidate = bm)
   AND g.season = $season
   AND comp.id IN ['GB1', 'ES1', 'IT1', 'BL1', 'L1', 'FR1']
 
 WITH bm, bmMarketValuation, bmAge, candidate, c, g, pi, a, clubFormations,
      CASE WHEN pi.hosting = 'Home' THEN g.homeClubFormation ELSE g.awayClubFormation END AS matchFormation,
-     CASE WHEN bm IS NOT NULL AND candidate = bm THEN true WHEN toLower(candidate.name) CONTAINS toLower($benchmark_player) THEN true ELSE false END AS isBenchmark,
+     CASE WHEN bm IS NOT NULL AND candidate = bm THEN true ELSE false END AS isBenchmark,
      CASE WHEN candidate.dateOfBirth IS NOT NULL AND toString(candidate.dateOfBirth) <> 'NaN' THEN ($season - toInteger(left(toString(candidate.dateOfBirth), 4))) ELSE NULL END AS age
 
 WITH bm, bmMarketValuation, bmAge, candidate, isBenchmark, age, clubFormations,
@@ -151,7 +151,7 @@ def extract_scouting_parameters(
     Returns:
         Structured ReplacementCandidatesInput instance.
     """
-    model = model_name or settings.GRAPH_LLM_MODEL
+    model = model_name or settings.LLM_MODEL
     key = api_key or settings.GEMINI_API_KEY
 
     llm = ChatGoogleGenerativeAI(
@@ -160,6 +160,7 @@ def extract_scouting_parameters(
         temperature=0.0,
         max_output_tokens=settings.MAX_OUTPUT_TOKENS,
         thinking_level="low",
+        max_retries=3,
     )
 
     extractor = llm.with_structured_output(ReplacementCandidatesInput)

@@ -42,6 +42,10 @@ TOOL ROUTING INSTRUCTIONS:
 3. If the user question is OUT OF SCOPE (not related to football):
    Do NOT call any tool. Respond directly stating politely that you are a specialized football assistant and the question is out of scope.
 
+SINGLE TOOL EXECUTION RULE:
+- Execute at most ONE tool call per user question.
+- Do NOT retry calling tools or loop if a tool query returns 0 records or no matches found in the database. Synthesize your final natural language answer immediately based on the tool result returned.
+
 RESPONSE FORMATTING INSTRUCTION:
 When formatting responses from retrieved graph database records or tools, synthesize the raw data into a clear, direct, and concise natural language answer matching the user question without raw dictionary strings, debug blocks, or Cypher code.
 """
@@ -60,22 +64,23 @@ class GraphRAGAgent:
         Initialize GraphRAGAgent with native LangChain v1 create_agent.
 
         Args:
-            model_name: Optional Gemini model identifier. Defaults to settings.GRAPH_LLM_MODEL.
+            model_name: Optional Gemini model identifier. Defaults to settings.LLM_MODEL.
             api_key: Optional Gemini API key. Defaults to settings.GEMINI_API_KEY.
         """
-        self.model_name = model_name or settings.GRAPH_LLM_MODEL
+        self.model_name = model_name or settings.LLM_MODEL
         self.api_key = api_key or settings.GEMINI_API_KEY
 
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY is missing. Set it in .env or pass to GraphRAGAgent.")
 
-        # Initialize ChatGoogleGenerativeAI with thinking_level="low" and max_output_tokens
+        # Initialize ChatGoogleGenerativeAI with thinking_level="low", max_output_tokens, and max 3 retries
         self.llm = ChatGoogleGenerativeAI(
             model=self.model_name,
             google_api_key=self.api_key,
             temperature=0.0,
             max_output_tokens=settings.MAX_OUTPUT_TOKENS,
             thinking_level="low",
+            max_retries=3,
         )
         
         # Define tools for the agent
@@ -122,20 +127,29 @@ class GraphRAGAgent:
                         if tname == "get_replacement_candidates":
                             cypher_used = "DYNAMIC_REPLACEMENT_CANDIDATES_CYPHER"
 
-                if hasattr(msg, "content") and isinstance(msg.content, str) and msg.content.startswith("{"):
-                    try:
-                        parsed = json.loads(msg.content)
-                        if "cypher_used" in parsed:
-                            cypher_used = parsed.get("cypher_used")
-                    except Exception:
-                        pass
+                if hasattr(msg, "content") and isinstance(msg.content, str):
+                    content = msg.content
+                    if "Cypher Query Executed:\n" in content:
+                        parts = content.split("Cypher Query Executed:\n")
+                        if len(parts) > 1:
+                            cypher_used = parts[1].split("\n\n")[0].strip()
+                    elif content.startswith("{"):
+                        try:
+                            parsed = json.loads(content)
+                            if "cypher_used" in parsed:
+                                cypher_used = parsed.get("cypher_used")
+                        except Exception:
+                            pass
 
         except Exception as exc:
             logger.error("Error during GraphRAG query execution: %s", exc, exc_info=True)
             answer_text = f"An error occurred while processing your request: {str(exc)}"
 
+        final_answer = answer_text or OUT_OF_SCOPE_RESPONSE
+        logger.info("GraphRAG final response generated:\n  Answer: %s\n  Cypher Used: %s", final_answer, cypher_used)
+
         return GraphRAGResponse(
-            answer=answer_text or OUT_OF_SCOPE_RESPONSE,
+            answer=final_answer,
             cypher_used=cypher_used,
         )
 

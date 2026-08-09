@@ -75,7 +75,7 @@ def health_check() -> HealthResponse:
     return HealthResponse(
         status="ok",
         neo4j_connected=neo4j_connected,
-        model=settings.GRAPH_LLM_MODEL,
+        model=settings.LLM_MODEL,
     )
 
 

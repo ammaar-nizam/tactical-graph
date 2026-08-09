@@ -73,3 +73,30 @@ CREATE INDEX player_name_index IF NOT EXISTS FOR (p:Player) ON (p.name);
 CREATE INDEX club_name_index IF NOT EXISTS FOR (c:Club) ON (c.name);
 CREATE INDEX game_date_index IF NOT EXISTS FOR (g:Game) ON (g.date);
 ```
+
+### Full-Text Indexes
+Enables fast fuzzy name search via `CALL db.index.fulltext.queryNodes(indexName, 'term~')` with Lucene query syntax.
+
+```cypher
+CREATE FULLTEXT INDEX player_name_fulltext IF NOT EXISTS FOR (p:Player) ON EACH [p.name];
+CREATE FULLTEXT INDEX club_name_fulltext IF NOT EXISTS FOR (c:Club) ON EACH [c.name];
+CREATE FULLTEXT INDEX country_name_fulltext IF NOT EXISTS FOR (c:Country) ON EACH [c.name];
+CREATE FULLTEXT INDEX national_team_name_fulltext IF NOT EXISTS FOR (n:NationalTeam) ON EACH [n.name];
+CREATE FULLTEXT INDEX competition_name_fulltext IF NOT EXISTS FOR (c:Competition) ON EACH [c.name];
+CREATE FULLTEXT INDEX game_event_description_fulltext IF NOT EXISTS FOR (ge:GameEvent) ON EACH [ge.description];
+```
+
+**Query Usage Pattern:**
+```cypher
+// Player name fuzzy lookup
+CALL db.index.fulltext.queryNodes('player_name_fulltext', 'messi') YIELD node AS p, score
+WITH p ORDER BY score DESC LIMIT 1
+
+// Club name fuzzy lookup
+CALL db.index.fulltext.queryNodes('club_name_fulltext', 'manchester united') YIELD node AS c, score
+WITH c ORDER BY score DESC LIMIT 1
+
+// GameEvent description search
+CALL db.index.fulltext.queryNodes('game_event_description_fulltext', 'goal') YIELD node AS ge, score
+WITH ge ORDER BY score DESC LIMIT 5
+```

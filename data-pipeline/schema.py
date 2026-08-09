@@ -1,8 +1,8 @@
 """
 Schema setup and constraint installation module for TacticalGraph Neo4j database.
 
-Executes Cypher DDL queries to create uniqueness constraints and performance indexes
-for graph node entities in Neo4j.
+Executes Cypher DDL queries to create uniqueness constraints, performance indexes,
+and full-text indexes for graph node entities in Neo4j.
 """
 
 import logging
@@ -35,6 +35,15 @@ class SchemaInstaller:
         "CREATE INDEX game_date_index IF NOT EXISTS FOR (g:Game) ON (g.date)",
     ]
 
+    FULLTEXT_INDEXES: List[str] = [
+        "CREATE FULLTEXT INDEX player_name_fulltext IF NOT EXISTS FOR (p:Player) ON EACH [p.name]",
+        "CREATE FULLTEXT INDEX club_name_fulltext IF NOT EXISTS FOR (c:Club) ON EACH [c.name]",
+        "CREATE FULLTEXT INDEX country_name_fulltext IF NOT EXISTS FOR (c:Country) ON EACH [c.name]",
+        "CREATE FULLTEXT INDEX national_team_name_fulltext IF NOT EXISTS FOR (n:NationalTeam) ON EACH [n.name]",
+        "CREATE FULLTEXT INDEX competition_name_fulltext IF NOT EXISTS FOR (c:Competition) ON EACH [c.name]",
+        "CREATE FULLTEXT INDEX game_event_description_fulltext IF NOT EXISTS FOR (ge:GameEvent) ON EACH [ge.description]",
+    ]
+
     def __init__(self, db: Optional[Neo4jDatabase] = None) -> None:
         """
         Initialize SchemaInstaller.
@@ -58,6 +67,7 @@ class SchemaInstaller:
 
         installed_constraints = 0
         installed_indexes = 0
+        installed_fulltext_indexes = 0
 
         for query in self.CONSTRAINTS:
             try:
@@ -77,10 +87,20 @@ class SchemaInstaller:
                 logger.error("Failed to create index with query [%s]: %s", query, e)
                 raise
 
+        for query in self.FULLTEXT_INDEXES:
+            try:
+                logger.info("Creating full-text index: %s", query)
+                self.db.execute_query(query)
+                installed_fulltext_indexes += 1
+            except Exception as e:
+                logger.error("Failed to create full-text index with query [%s]: %s", query, e)
+                raise
+
         logger.info(
-            "Schema installation completed successfully. Installed %d constraints and %d indexes.",
+            "Schema installation completed successfully. Installed %d constraints, %d indexes, and %d full-text indexes.",
             installed_constraints,
             installed_indexes,
+            installed_fulltext_indexes,
         )
 
 

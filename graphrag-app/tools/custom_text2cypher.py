@@ -25,47 +25,62 @@ MUTATION_KEYWORDS = {
 }
 
 
+# Schema text cache in memory to avoid repeated database introspection queries
+_schema_cache: Optional[str] = None
+
+
 def get_schema() -> str:
     """
     Extract dynamic graph schema (Node Labels, Relationship Types, and Properties)
     from Neo4j database using Cypher schema introspection procedures.
+    Caches result in memory after the first call.
 
     Returns:
         Formatted string summarizing graph schema definitions.
     """
-    # Query node labels and property keys via Cypher procedure
-    node_records = execute_cypher_query(
-        "CALL db.schema.nodeTypeProperties() YIELD nodeType, propertyName "
-        "RETURN nodeType, collect(propertyName) AS properties"
-    )
+    global _schema_cache
+    if _schema_cache is not None:
+        return _schema_cache
 
-    # Query relationship types and property keys via Cypher procedure
-    rel_records = execute_cypher_query(
-        "CALL db.schema.relTypeProperties() YIELD relType, propertyName "
-        "RETURN relType, collect(propertyName) AS properties"
-    )
+    try:
+        # Query node labels and property keys via Cypher procedure
+        node_records = execute_cypher_query(
+            "CALL db.schema.nodeTypeProperties() YIELD nodeType, propertyName "
+            "RETURN nodeType, collect(propertyName) AS properties"
+        )
 
-    schema_parts = ["### GRAPH SCHEMA DEFINITIONS (Extracted dynamically via Cypher):", ""]
+        # Query relationship types and property keys via Cypher procedure
+        rel_records = execute_cypher_query(
+            "CALL db.schema.relTypeProperties() YIELD relType, propertyName "
+            "RETURN relType, collect(propertyName) AS properties"
+        )
 
-    if node_records:
-        schema_parts.append("Node Labels & Properties:")
-        for row in node_records:
-            node_label = row.get("nodeType", "")
-            props = ", ".join(row.get("properties", []))
-            schema_parts.append(f"- {node_label} ({props})")
-        schema_parts.append("")
+        schema_parts = ["### GRAPH SCHEMA DEFINITIONS (Extracted dynamically via Cypher):", ""]
 
-    if rel_records:
-        schema_parts.append("Relationships & Edge Properties:")
-        for row in rel_records:
-            rel_type = row.get("relType", "")
-            props = ", ".join(row.get("properties", []))
-            if props:
-                schema_parts.append(f"- {rel_type} {{{props}}}")
-            else:
-                schema_parts.append(f"- {rel_type}")
+        if node_records:
+            schema_parts.append("Node Labels & Properties:")
+            for row in node_records:
+                node_label = row.get("nodeType", "")
+                props = ", ".join(row.get("properties", []))
+                schema_parts.append(f"- {node_label} ({props})")
+            schema_parts.append("")
 
-    return "\n".join(schema_parts)
+        if rel_records:
+            schema_parts.append("Relationships & Edge Properties:")
+            for row in rel_records:
+                rel_type = row.get("relType", "")
+                props = ", ".join(row.get("properties", []))
+                if props:
+                    schema_parts.append(f"- {rel_type} {{{props}}}")
+                else:
+                    schema_parts.append(f"- {rel_type}")
+
+        _schema_cache = "\n".join(schema_parts)
+    except Exception as e:
+        logger.warning("Failed to extract dynamic schema from Neo4j: %s", e)
+        _schema_cache = "### GRAPH SCHEMA DEFINITIONS:\n- Player (name, position, dateOfBirth...)\n- Game (season, date...)"
+
+    return _schema_cache
 
 
 class CustomText2CypherTool:
@@ -83,22 +98,23 @@ class CustomText2CypherTool:
         Initialize CustomText2CypherTool.
 
         Args:
-            model_name: Optional Gemini model identifier. Defaults to settings.GRAPH_LLM_MODEL.
+            model_name: Optional Gemini model identifier. Defaults to settings.LLM_MODEL.
             api_key: Optional Gemini API key. Defaults to settings.GEMINI_API_KEY.
         """
-        self.model_name = model_name or settings.GRAPH_LLM_MODEL
+        self.model_name = model_name or settings.LLM_MODEL
         self.api_key = api_key or settings.GEMINI_API_KEY
 
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY is missing. Set it in .env or pass to CustomText2CypherTool.")
 
-        # Initialize LangChain Gemini LLM with structured output and max_output_tokens
+        # Initialize LangChain Gemini LLM with structured output, max_output_tokens, and max 3 retries
         self.llm = ChatGoogleGenerativeAI(
             model=self.model_name,
             google_api_key=self.api_key,
             temperature=0.0,
             max_output_tokens=settings.MAX_OUTPUT_TOKENS,
             thinking_level="low",
+            max_retries=3,
         )
 
         self.structured_llm = self.llm.with_structured_output(CypherGenerationOutput)
@@ -119,14 +135,15 @@ Your task is to translate user natural language questions into precise, producti
 {self.schema_text}
 
 ### RULES & CONVENTIONS:
-1. Generate strictly read-only queries using MATCH, OPTIONAL MATCH, WHERE, WITH, RETURN, ORDER BY, LIMIT.
+1. Generate strictly read-only queries using CALL, MATCH, OPTIONAL MATCH, WHERE, WITH, RETURN, ORDER BY, LIMIT.
 2. Never use write/mutation clauses: CREATE, MERGE, DELETE, DETACH, SET, REMOVE, DROP.
 3. Strict limit clause: Always append `LIMIT 5` (or lower) to every generated query unless explicitly requested otherwise.
-4. Case-insensitive string matching: Always use toLower(n.prop) CONTAINS 'term' for names (e.g. toLower(p.name) CONTAINS 'fellaini').
-5. Filter out stub/null names: Include `WHERE p.name IS NOT NULL` or `c.name IS NOT NULL` when querying players/clubs.
-6. `isWin` on [:PLAYED_IN] is integer 1 or 0 (NOT boolean true/false).
-7. Convert numeric/string properties safely: use `toLower(toString(p.subPosition))` for position checks.
-8. Domain boundary & Out-of-scope rule: The domain is strictly football (soccer). If the user question is unrelated to football or non-queryable against the graph schema, do NOT invent queries for out-of-scope topics.
+4. Name lookups: ALWAYS use `CALL db.index.fulltext.queryNodes(...)` for Player, Club, Country, NationalTeam, Competition, and GameEvent. NEVER use toLower CONTAINS for these properties.
+5. Non-indexed string properties (position, subPosition, countryOfCitizenship etc.): use `toLower(toString(p.subPosition)) CONTAINS 'term'`.
+6. Filter out stub/null names: Include `WHERE p.name IS NOT NULL` after MATCH traversals that may yield unresolved nodes.
+7. `isWin` on [:PLAYED_IN] is integer 1 or 0 (NOT boolean true/false).
+8. `g.season` on (:Game) is ALWAYS an INTEGER (e.g. `g.season = 2014`). NEVER use string literals like `'2014'` or `'2014/15'`. For 2014/15, use `g.season = 2014`.
+9. Domain boundary & Out-of-scope rule: The domain is strictly football (soccer). If the user question is unrelated to football or non-queryable against the graph schema, do NOT invent queries.
 
 
 ### FEW-SHOT EXAMPLES:
@@ -156,8 +173,14 @@ Return your response strictly adhering to the CypherGenerationOutput schema.
         if mutations_found:
             return False, f"Cypher query contains non-read-only mutation keywords: {list(mutations_found)}"
 
-        if not (clean_cypher.startswith("MATCH") or clean_cypher.startswith("WITH") or clean_cypher.startswith("OPTIONAL MATCH") or clean_cypher.startswith("//")):
-            return False, "Query must begin with MATCH, OPTIONAL MATCH, or WITH."
+        if not (
+            clean_cypher.startswith("MATCH")
+            or clean_cypher.startswith("WITH")
+            or clean_cypher.startswith("OPTIONAL MATCH")
+            or clean_cypher.startswith("CALL")
+            or clean_cypher.startswith("//")
+        ):
+            return False, "Query must begin with MATCH, OPTIONAL MATCH, WITH, or CALL."
 
         return True, ""
 

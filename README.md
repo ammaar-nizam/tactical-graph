@@ -79,7 +79,7 @@ TRANSFER_DATASET_HANDLE=mexwell/football-player-transfers
 
 # Gemini & LLM Configuration
 GEMINI_API_KEY=your_gemini_api_key
-GRAPH_LLM_MODEL=gemini-3.6-flash
+LLM_MODEL=gemini-3.5-flash-lite
 ```
 
 ### 2. Python Virtual Environment Setup
