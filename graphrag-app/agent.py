@@ -146,7 +146,7 @@ class GraphRAGAgent:
             answer_text = f"An error occurred while processing your request: {str(exc)}"
 
         final_answer = answer_text or OUT_OF_SCOPE_RESPONSE
-        logger.info("GraphRAG final response generated:\n  Answer: %s\n  Cypher Used: %s", final_answer, cypher_used)
+        logger.info("Answer: %s", final_answer)
 
         return GraphRAGResponse(
             answer=final_answer,

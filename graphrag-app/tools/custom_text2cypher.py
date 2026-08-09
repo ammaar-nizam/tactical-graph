@@ -144,6 +144,7 @@ Your task is to translate user natural language questions into precise, producti
 7. `isWin` on [:PLAYED_IN] is integer 1 or 0 (NOT boolean true/false).
 8. `g.season` on (:Game) is ALWAYS an INTEGER (e.g. `g.season = 2014`). NEVER use string literals like `'2014'` or `'2014/15'`. For 2014/15, use `g.season = 2014`.
 9. Domain boundary & Out-of-scope rule: The domain is strictly football (soccer). If the user question is unrelated to football or non-queryable against the graph schema, do NOT invent queries.
+10. Variable scope preservation in WITH clauses: When performing aggregation in a WITH clause (e.g. min(), max(), count(), collect()), any variable referenced in subsequent WITH, RETURN, or MATCH clauses MUST be explicitly preserved in the WITH clause (e.g. `WITH p, c, min(g.season) AS startSeason, max(g.season) AS endSeason`).
 
 
 ### FEW-SHOT EXAMPLES:
@@ -235,7 +236,6 @@ Return your response strictly adhering to the CypherGenerationOutput schema.
 
 
 @tool("query_graph_with_custom_cypher")
-
 def query_graph_with_custom_cypher(question: str) -> str:
     """
     Execute a custom natural language query on the TacticalGraph knowledge graph by generating read-only Cypher.
@@ -248,7 +248,9 @@ def query_graph_with_custom_cypher(question: str) -> str:
         Formatted string containing generated Cypher query and execution record results.
     """
     tool_inst = CustomText2CypherTool()
-    out, data = tool_inst.run(question)
-    return format_custom_cypher_records(out.cypher_query, data)
-
-
+    try:
+        out, data = tool_inst.run(question)
+        return format_custom_cypher_records(out.cypher_query, data)
+    except Exception as e:
+        logger.error("Error executing custom Cypher query for question '%s': %s", question, e)
+        return f"Cypher Execution Error: {str(e)}"

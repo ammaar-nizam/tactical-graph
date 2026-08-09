@@ -76,15 +76,16 @@ FEW_SHOT_EXAMPLES: List[Dict[str, str]] = [
         ),
     },
     {
-        # Pattern: fulltext player lookup + per-season appearance stats per competition
-        "question": "Show Mohamed Salah's 2024/25 Premier League match-by-match stats",
+        # Pattern: fulltext player + club lookup + season range aggregation with WITH variable scope preservation
+        "question": "From which season to which season did Cristiano Ronaldo play for Real Madrid?",
         "cypher": (
-            "CALL db.index.fulltext.queryNodes('player_name_fulltext', 'salah') YIELD node AS p, score "
-            "WITH p ORDER BY score DESC LIMIT 1 "
-            "MATCH (p)-[a:APPEARED_IN]->(g:Game)-[:PART_OF_COMPETITION]->(comp:Competition) "
-            "WHERE comp.id = 'GB1' AND g.season = 2024 "
-            "RETURN g.date AS date, a.minutesPlayed AS minutes, a.goals AS goals, "
-            "a.assists AS assists, a.yellowCards AS yellows, a.position AS position ORDER BY g.date LIMIT 5"
+            "CALL db.index.fulltext.queryNodes('player_name_fulltext', 'cristiano ronaldo') YIELD node AS p, score AS s1 "
+            "WITH p ORDER BY s1 DESC LIMIT 1 "
+            "CALL db.index.fulltext.queryNodes('club_name_fulltext', 'real madrid') YIELD node AS c, score AS s2 "
+            "WITH p, c ORDER BY s2 DESC LIMIT 1 "
+            "MATCH (p)-[:APPEARED_IN]->(g:Game)<-[:PLAYED_IN]-(c) "
+            "WITH p, c, min(g.season) AS startSeason, max(g.season) AS endSeason "
+            "RETURN p.name AS player, c.name AS club, startSeason, endSeason"
         ),
     },
     {
