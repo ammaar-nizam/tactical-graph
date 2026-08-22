@@ -2,8 +2,6 @@
 
 TacticalGraph is a high-performance Knowledge Graph (Neo4j) data ingestion engine and GraphRAG platform designed for tactical football/soccer analytics using Kaggle Transfermarkt data.
 
-> Developed with **Antigravity CLI**.
-
 ---
 
 ## Repository Structure
@@ -68,10 +66,10 @@ cp .env.example .env
 Configuration parameters in `.env`:
 ```env
 # Neo4j Database Credentials & Connection Endpoint
-NEO4J_URI=neo4j+s://4446f270.databases.neo4j.io
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=your_password
-NEO4J_DATABASE=neo4j
+NEO4J_URI=neo4j+s://instance-id.databases.neo4j.io
+NEO4J_USER=user_name
+NEO4J_PASSWORD=password
+NEO4J_DATABASE=db_name
 
 # Kaggle Dataset Handles
 KAGGLE_DATASET_HANDLE=davidcariboo/player-scores

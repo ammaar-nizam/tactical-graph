@@ -76,6 +76,19 @@ FEW_SHOT_EXAMPLES: List[Dict[str, str]] = [
         ),
     },
     {
+        # Pattern: fulltext club lookup + season squad lineup (first-choice XI by minutes/appearances in a season)
+        "question": "What did Celtic's first-choice XI look like in the 2015/16 season?",
+        "cypher": (
+            "CALL db.index.fulltext.queryNodes('club_name_fulltext', 'celtic') YIELD node AS c, score "
+            "WITH c ORDER BY score DESC LIMIT 1 "
+            "MATCH (p:Player)-[a:APPEARED_IN]->(g:Game)<-[:PLAYED_IN]-(c) "
+            "WHERE g.season = 2015 AND p.name IS NOT NULL "
+            "WITH p, count(DISTINCT g) AS appearances, sum(a.minutesPlayed) AS minutes "
+            "RETURN p.name AS player, p.position AS position, appearances, minutes "
+            "ORDER BY minutes DESC, appearances DESC LIMIT 11"
+        ),
+    },
+    {
         # Pattern: fulltext player + club lookup + season range aggregation with WITH variable scope preservation
         "question": "From which season to which season did Cristiano Ronaldo play for Real Madrid?",
         "cypher": (
@@ -138,6 +151,33 @@ FEW_SHOT_EXAMPLES: List[Dict[str, str]] = [
             "WITH p1, p2 ORDER BY s2 DESC LIMIT 1 "
             "MATCH (p1)-[:APPEARED_IN]->(g:Game)<-[:APPEARED_IN]-(p2) "
             "RETURN p1.name AS player1, p2.name AS player2, g.date AS matchDate, g.id AS gameId "
+            "ORDER BY g.date DESC LIMIT 5"
+        ),
+    },
+    {
+        # Pattern: fulltext club lookup + formation extraction based on hosting + manager/win rate aggregation
+        "question": "What is Bayern Munich's most used formation under Pep Guardiola?",
+        "cypher": (
+            "CALL db.index.fulltext.queryNodes('club_name_fulltext', 'bayern munich') YIELD node AS club, score "
+            "WITH club ORDER BY score DESC LIMIT 1 "
+            "MATCH (club)-[pi:PLAYED_IN]->(g:Game) "
+            "WHERE toLower(toString(pi.ownManagerName)) CONTAINS 'guardiola' "
+            "WITH CASE WHEN pi.hosting = 'Home' THEN g.homeClubFormation ELSE g.awayClubFormation END AS formation, "
+            "count(*) AS usage "
+            "WHERE formation IS NOT NULL AND toString(formation) <> 'NaN' "
+            "RETURN formation, usage ORDER BY usage DESC LIMIT 5"
+        ),
+    },
+    {
+        # Pattern: dual manager match traversal on PLAYED_IN edges (head-to-head manager record)
+        "question": "Has Guardiola ever managed against Mourinho and what was the record?",
+        "cypher": (
+            "MATCH (c1:Club)-[pi1:PLAYED_IN]->(g:Game)<-[pi2:PLAYED_IN]-(c2:Club) "
+            "WHERE toLower(toString(pi1.ownManagerName)) CONTAINS 'guardiola' "
+            "AND toLower(toString(pi2.ownManagerName)) CONTAINS 'mourinho' "
+            "AND c1 <> c2 "
+            "RETURN g.date AS date, g.season AS season, c1.name AS guardiolaClub, c2.name AS mourinhoClub, "
+            "pi1.ownGoals AS guardiolaGoals, pi2.ownGoals AS mourinhoGoals, pi1.isWin AS guardiolaWon "
             "ORDER BY g.date DESC LIMIT 5"
         ),
     },

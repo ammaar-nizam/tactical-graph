@@ -2,14 +2,20 @@
 GraphRAG agent orchestrator module for TacticalGraph.
 
 Initializes ChatGoogleGenerativeAI using native LangChain v1 create_agent
+with short-term memory (InMemorySaver checkpointer) and context trimming middleware.
 """
 
 import json
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
-from langchain.agents import create_agent
+from langchain.agents import AgentState, create_agent
+from langchain.agents.middleware import before_model
+from langchain_core.messages import RemoveMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
+from langgraph.runtime import Runtime
 
 from config import settings
 from models import GraphRAGResponse
@@ -54,25 +60,57 @@ RESPONSE FORMATTING INSTRUCTION:
 When formatting responses from retrieved graph database records or tools, synthesize the raw data into a clear, direct, and concise natural language answer matching the user question without raw dictionary strings, debug blocks, or Cypher code.
 """
 
+
+@before_model
+def trim_messages(state: AgentState, runtime: Runtime) -> Dict[str, Any] | None:
+    """
+    Middleware function to trim message history, keeping the initial system message/context
+    plus the most recent messages (3 user and 3 AI responses / recent turns) to fit the context window.
+    """
+    messages = state["messages"]
+
+    if len(messages) <= 3:
+        return None  # No changes needed
+
+    first_msg = messages[0]
+    recent_messages = messages[-3:] if len(messages) % 2 == 0 else messages[-4:]
+    new_messages = [first_msg] + recent_messages
+
+    return {
+        "messages": [
+            RemoveMessage(id=REMOVE_ALL_MESSAGES),
+            *new_messages,
+        ]
+    }
+
+
+# Shared default checkpointer for thread-level short-term memory persistence
+_DEFAULT_CHECKPOINTER = InMemorySaver()
+
+
 class GraphRAGAgent:
     """
-    Orchestrates router tool selection and execution using native LangChain create_agent.
+    Orchestrates router tool selection and execution using native LangChain create_agent
+    with short-term memory checkpointer and @before_model message trimming middleware.
     """
 
     def __init__(
         self,
         model_name: Optional[str] = None,
         api_key: Optional[str] = None,
+        checkpointer: Optional[Any] = None,
     ) -> None:
         """
-        Initialize GraphRAGAgent with native LangChain v1 create_agent.
+        Initialize GraphRAGAgent with native LangChain v1 create_agent and checkpointer.
 
         Args:
             model_name: Optional Gemini model identifier. Defaults to settings.LLM_MODEL.
             api_key: Optional Gemini API key. Defaults to settings.GEMINI_API_KEY.
+            checkpointer: Optional Checkpointer instance. Defaults to global _DEFAULT_CHECKPOINTER.
         """
         self.model_name = model_name or settings.LLM_MODEL
         self.api_key = api_key or settings.GEMINI_API_KEY
+        self.checkpointer = checkpointer if checkpointer is not None else _DEFAULT_CHECKPOINTER
 
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY is missing. Set it in .env or pass to GraphRAGAgent.")
@@ -86,37 +124,44 @@ class GraphRAGAgent:
             thinking_level="low",
             max_retries=3,
         )
-        
+
         # Define tools for the agent
         self.tools = [
             get_replacement_candidates,
             query_graph_with_custom_cypher,
         ]
 
-        # Create agent
+        # Create agent with short-term memory checkpointer & @before_model trimming middleware
         self.agent = create_agent(
             model=self.llm,
             tools=self.tools,
             system_prompt=AGENT_SYSTEM_PROMPT,
+            checkpointer=self.checkpointer,
+            middleware=[trim_messages],
         )
 
-    def query(self, user_question: str) -> GraphRAGResponse:
+    def query(self, user_question: str, thread_id: str = "default") -> GraphRAGResponse:
         """
-        Process a user question and return structured GraphRAGResponse.
+        Process a user question with short-term memory context and return structured GraphRAGResponse.
 
         Args:
             user_question: Natural language question asked by the user.
+            thread_id: Thread/session identifier for maintaining short-term memory context.
 
         Returns:
             GraphRAGResponse containing natural language answer and cypher query used.
         """
-        logger.info("GraphRAG agent processing question via LangChain agent: '%s'", user_question)
+        logger.info("GraphRAG agent processing question for thread_id '%s': '%s'", thread_id, user_question)
 
         cypher_used: Optional[str] = None
         answer_text: str = ""
+        thread_config = {"configurable": {"thread_id": thread_id}}
 
         try:
-            res = self.agent.invoke({"messages": [("user", user_question)]})
+            res = self.agent.invoke(
+                {"messages": [("user", user_question)]},
+                config=thread_config,
+            )
             messages = res.get("messages", [])
 
             if messages:
@@ -158,15 +203,17 @@ class GraphRAGAgent:
         )
 
 
-def query_graphrag(user_question: str) -> GraphRAGResponse:
+def query_graphrag(user_question: str, thread_id: str = "default") -> GraphRAGResponse:
     """
-    Public entry point to process a user question and return a structured GraphRAGResponse.
+    Public entry point to process a user question with short-term memory context.
 
     Args:
         user_question: Natural language query string.
+        thread_id: Thread/session identifier for maintaining short-term context.
 
     Returns:
         GraphRAGResponse instance.
     """
     agent = GraphRAGAgent()
-    return agent.query(user_question)
+    return agent.query(user_question, thread_id=thread_id)
+

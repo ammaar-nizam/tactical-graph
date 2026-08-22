@@ -221,7 +221,7 @@ def main() -> None:
             dev_mode,
         )
 
-        # Step 5: Transfer data
+        # Step 5: Transfer data (davidcariboo — authoritative)
         _timed_step(
             "Transfers Loader",
             TransfersLoader(db=db, settings=settings).load,
@@ -229,10 +229,16 @@ def main() -> None:
             dev_mode,
         )
 
-        # Step 5b: Supplementary Transfer data (mexwell dataset, name-based matching)
+        # Step 5c: Remove stub nodes (id-only) before mexwell name-based MATCH lookups run.
+        _timed_step(
+            "Stub Node Cleanup",
+            TransfersLoader(db=db, settings=settings).cleanup_stub_nodes,
+        )
+
+        # Step 5b: Enrich TRANSFERRED_TO edges with transferPeriod from mexwell CSVs.
         if transfer_dataset_path:
             _timed_step(
-                "Supplementary Transfers Loader (name-matching)",
+                "Supplementary Transfers Enrichment (mexwell transfer_period)",
                 TransfersLoader(db=db, settings=settings).load_supplementary_transfers,
                 transfer_dataset_path,
                 dataset_path,

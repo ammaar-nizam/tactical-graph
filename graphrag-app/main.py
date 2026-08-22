@@ -80,8 +80,8 @@ def health_check() -> HealthResponse:
 
 
 
-@app.post("/chat", response_model=GraphRAGResponse, tags=["GraphRAG Agent"])
-def execute_graphrag_query(request: QueryRequest) -> GraphRAGResponse:
+@app.post("/chat/{thread_id}", response_model=GraphRAGResponse, tags=["GraphRAG Agent"])
+def execute_graphrag_query(request: QueryRequest, thread_id: str = "default") -> GraphRAGResponse:
     """
     Natural Language GraphRAG query endpoint.
 
@@ -95,8 +95,8 @@ def execute_graphrag_query(request: QueryRequest) -> GraphRAGResponse:
         )
 
     try:
-        logger.info("Received API /chat request: '%s'", request.query)
-        response = query_graphrag(request.query)
+        logger.info("Received API /chat request (thread_id: '%s'): '%s'", thread_id, request.query)
+        response = query_graphrag(request.query, thread_id=thread_id)
         return response
     except Exception as e:
         logger.error("Error executing /chat endpoint: %s", e, exc_info=True)

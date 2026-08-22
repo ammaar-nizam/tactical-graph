@@ -33,6 +33,10 @@ class SchemaInstaller:
         "CREATE INDEX player_name_index IF NOT EXISTS FOR (p:Player) ON (p.name)",
         "CREATE INDEX club_name_index IF NOT EXISTS FOR (c:Club) ON (c.name)",
         "CREATE INDEX game_date_index IF NOT EXISTS FOR (g:Game) ON (g.date)",
+        # Composite relationship index: accelerates MERGE on TRANSFERRED_TO
+        # using the canonical key (transferSeason, fromClubId), making it
+        # O(log n) instead of a full adjacency-list traversal per row.
+        "CREATE INDEX transferred_to_season_idx IF NOT EXISTS FOR ()-[r:TRANSFERRED_TO]-() ON (r.transferSeason, r.fromClubId)",
     ]
 
     FULLTEXT_INDEXES: List[str] = [
